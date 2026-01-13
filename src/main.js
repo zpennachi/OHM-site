@@ -1,4 +1,4 @@
-import { setVhVar } from "./utils.js";
+import { setVhVar, isIOSUA, isMobileUA } from "./utils.js";
 import { createSections } from "./sections.js";
 import { mountFooterNav } from "./footerNav.js";
 import { createThreeScene } from "./threeScene.js";
@@ -19,7 +19,6 @@ const MODEL_STATES = [
   { zoom: 1.0, yShift: 0.0, rotX: 0.0, rotY: -3.0 }
 ];
 
-// Pointer-driven light controls (same behavior as before)
 function createPointerLightControls() {
   const state = {
     targetRotation: { x: 0, y: 0 },
@@ -67,6 +66,75 @@ function createPointerLightControls() {
   };
 }
 
+function createDebugOverlay() {
+  const params = new URLSearchParams(window.location.search);
+  let enabled = params.get("debug") === "1";
+
+  const kv = new Map();
+  const errs = [];
+  let el = null;
+
+  function ensureEl() {
+    if (el) return el;
+    el = document.createElement("div");
+    el.className = "debug-overlay";
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function render() {
+    if (!enabled) {
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+      el = null;
+      return;
+    }
+
+    const node = ensureEl();
+    const lines = [];
+    lines.push("DEBUG");
+    for (const [k, v] of kv.entries()) lines.push(`${k}: ${v}`);
+    if (errs.length) {
+      lines.push("");
+      lines.push("errors:");
+      for (let i = 0; i < Math.min(errs.length, 6); i++) lines.push(`- ${errs[i]}`);
+      if (errs.length > 6) lines.push(`- (+${errs.length - 6} more)`);
+    }
+
+    node.innerHTML = `<div class="debug-title">debug (press D to toggle)</div>${lines.join(
+      "\n"
+    )}`;
+  }
+
+  function set(key, value) {
+    kv.set(key, value);
+    render();
+  }
+
+  function pushErr(msg) {
+    errs.unshift(msg);
+    if (errs.length > 30) errs.pop();
+    render();
+  }
+
+  function toggle() {
+    enabled = !enabled;
+    render();
+  }
+
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "d" || e.key === "D") toggle();
+  });
+
+  render();
+
+  return {
+    set,
+    pushErr,
+    toggle,
+    isEnabled: () => enabled
+  };
+}
+
 function setupButtons(handleNavClick) {
   const heroEnter = document.getElementById("hero-enter");
   if (heroEnter) heroEnter.addEventListener("click", () => handleNavClick("contact"));
@@ -97,12 +165,17 @@ function setupButtons(handleNavClick) {
 (function boot() {
   setVhVar();
 
+  const debug = createDebugOverlay();
+  debug.set("ios", String(isIOSUA()));
+  debug.set("mobile", String(isMobileUA()));
+  debug.set("url", window.location.pathname);
+
   const pointer = createPointerLightControls();
   const sections = createSections(NAV_ITEMS);
 
   const mountEl = document.getElementById("three-root");
   if (!mountEl) {
-    console.error("Missing #three-root");
+    debug.pushErr("Missing #three-root");
     return;
   }
 
@@ -110,7 +183,8 @@ function setupButtons(handleNavClick) {
     mountEl,
     getScrollTarget: () => sections.state.scrollTarget,
     getPointerState: () => pointer.state,
-    modelStates: MODEL_STATES
+    modelStates: MODEL_STATES,
+    debugApi: debug
   });
 
   setupButtons(sections.handleNavClick);
@@ -118,7 +192,6 @@ function setupButtons(handleNavClick) {
   const getActiveItem = () =>
     NAV_ITEMS.find((i) => i.key === sections.state.activeKey) || NAV_ITEMS[0];
 
-  // initial background
   three.startCrossfadeTo(getActiveItem().image);
 
   mountFooterNav({
@@ -129,15 +202,25 @@ function setupButtons(handleNavClick) {
     onItemClick: (key) => sections.handleNavClick(key)
   });
 
-  // When active section changes (scroll), update background
+  const hint = document.getElementById("hero-scroll-hint");
   let lastActive = sections.state.activeKey;
-  function watchActive() {
+
+  function tick() {
     const active = sections.state.activeKey;
     if (active !== lastActive) {
       lastActive = active;
       three.startCrossfadeTo(getActiveItem().image);
     }
-    requestAnimationFrame(watchActive);
+
+    if (hint) {
+      const show = sections.state.heroProgress < 0.06;
+      hint.style.opacity = show ? "0.7" : "0";
+      hint.style.transform = show ? "translateY(0)" : "translateY(-6px)";
+      hint.style.transition = "opacity 240ms ease, transform 240ms ease";
+    }
+
+    requestAnimationFrame(tick);
   }
-  watchActive();
+
+  tick();
 })();
