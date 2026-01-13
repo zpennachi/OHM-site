@@ -2,26 +2,14 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { asset } from "./utils.js";
 
-const MODEL_STATES = [
-  { zoom: 1.0, yShift: 0.0, rotX: 0.0, rotY: 0.0 },
-  { zoom: 4.0, yShift: 2.5, rotX: 0.0, rotY: 1.0 },
-  { zoom: 7.0, yShift: 2.0, rotX: 0.0, rotY: 0.0 },
-  { zoom: 5.2, yShift: 1.5, rotX: -1.15, rotY: -3.0 },
-  { zoom: 1.0, yShift: 0.0, rotX: 0.0, rotY: -3.0 },
-];
-
-function refOrDefault(r, fallback) {
-  if (r && typeof r === "object" && "current" in r) return r;
-  return { current: fallback };
-}
-
-export function createThreeScene(params) {
-  const mountEl = params?.mountEl;
-
-  const scrollTargetRef = refOrDefault(params?.scrollTargetRef, 0);
-  const targetRotationRef = refOrDefault(params?.targetRotationRef, { x: 0, y: 0 });
-  const lightIntensityRef = refOrDefault(params?.lightIntensityRef, 0.7);
-  const lightSpeedRef = refOrDefault(params?.lightSpeedRef, 0);
+export function createThreeScene({ mountEl, getScrollTarget, getPointerState, modelStates, debugApi }) {
+  const dbg = debugApi || null;
+  const log = (k, v) => {
+    if (dbg && typeof dbg.set === "function") dbg.set(k, v);
+  };
+  const err = (m) => {
+    if (dbg && typeof dbg.pushErr === "function") dbg.pushErr(m);
+  };
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
@@ -43,16 +31,7 @@ export function createThreeScene(params) {
   renderer.setPixelRatio(1);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.setClearColor(0x000000, 1);
-
   renderer.domElement.className = "three-canvas";
-
-  if (!mountEl) {
-    return {
-      startCrossfadeTo: () => {},
-      destroy: () => {},
-    };
-  }
-
   mountEl.appendChild(renderer.domElement);
 
   const MAX_RENDER_PIXELS = 1000 * 1000;
@@ -60,8 +39,8 @@ export function createThreeScene(params) {
   function updateRendererSize() {
     const w = window.innerWidth || 1;
     const h = window.innerHeight || 1;
-
     const area = w * h;
+
     let scale = 1;
     if (area > MAX_RENDER_PIXELS) scale = Math.sqrt(MAX_RENDER_PIXELS / area);
 
@@ -71,9 +50,14 @@ export function createThreeScene(params) {
     renderer.setSize(rw, rh, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+
+    log("r_size", `${rw}x${rh} (css ${w}x${h})`);
   }
 
   updateRendererSize();
+
+  const gl = renderer.getContext();
+  if (!gl) err("WebGL context unavailable");
 
   const amb = new THREE.AmbientLight(0xffffff, 0.7);
   scene.add(amb);
@@ -89,7 +73,7 @@ export function createThreeScene(params) {
   const texLoader = new THREE.TextureLoader();
   const textureCache = new Map();
 
-  function prepTex(tex) {
+  function prepEnvTexture(tex) {
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.mapping = THREE.EquirectangularReflectionMapping;
     tex.minFilter = THREE.LinearFilter;
@@ -99,20 +83,25 @@ export function createThreeScene(params) {
     return tex;
   }
 
-  function loadTex(fileName, cb) {
+  function loadTextureFile(fileName, cb) {
     if (textureCache.has(fileName)) {
       cb(textureCache.get(fileName));
       return;
     }
 
+    const url = asset(`images/${fileName}`);
+    log("tex_req", fileName);
+
     texLoader.load(
-      asset(`images/${fileName}`),
+      url,
       (tex) => {
         textureCache.set(fileName, tex);
         cb(tex);
       },
       undefined,
-      () => {}
+      () => {
+        err(`Texture failed: ${fileName}`);
+      }
     );
   }
 
@@ -150,7 +139,7 @@ export function createThreeScene(params) {
   const fadeDuration = 0.22;
 
   function setInitialBg(tex) {
-    const t = prepTex(tex);
+    const t = prepEnvTexture(tex);
     scene.environment = t;
     bgMatA.map = t;
     bgMatB.map = t;
@@ -164,8 +153,8 @@ export function createThreeScene(params) {
   }
 
   function startCrossfadeTo(fileName) {
-    loadTex(fileName, (tex) => {
-      const t = prepTex(tex);
+    loadTextureFile(fileName, (tex) => {
+      const t = prepEnvTexture(tex);
       scene.environment = t;
 
       const fromMat = fadeFromA ? bgMatA : bgMatB;
@@ -177,10 +166,12 @@ export function createThreeScene(params) {
 
       isFading = true;
       fadeT = 0;
+
+      log("bg", fileName);
     });
   }
 
-  loadTex("1-min.jpg", setInitialBg);
+  loadTextureFile("1-min.jpg", setInitialBg);
 
   const videoEl = document.createElement("video");
   videoEl.muted = true;
@@ -248,8 +239,11 @@ export function createThreeScene(params) {
 
   const loader = new GLTFLoader();
 
+  const glbUrl = asset("models/ohm4.glb");
+  log("glb", "ohm4.glb");
+
   loader.load(
-    asset("models/ohm4.glb"),
+    glbUrl,
     (gltf) => {
       model = gltf.scene;
 
@@ -299,9 +293,13 @@ export function createThreeScene(params) {
       bottomShift = (size.y / 2) * scale;
 
       scene.add(model);
+
+      log("model", "loaded");
     },
     undefined,
-    () => {}
+    () => {
+      err("GLB failed: ohm4.glb");
+    }
   );
 
   let frameId = 0;
@@ -333,20 +331,26 @@ export function createThreeScene(params) {
       }
     }
 
-    const targetIntensity = lightIntensityRef.current;
+    const ps = (typeof getPointerState === "function" ? getPointerState() : null) || {
+      targetRotation: { x: 0, y: 0 },
+      lightIntensity: 0.7,
+      lightSpeed: 0,
+    };
+
+    const targetIntensity = ps.lightIntensity ?? 0.7;
     const liLerp = 0.1;
 
     amb.intensity += (targetIntensity - amb.intensity) * liLerp;
     dir.intensity += (targetIntensity - dir.intensity) * liLerp;
 
-    const speedT = THREE.MathUtils.clamp(lightSpeedRef.current, 0, 1);
+    const speedT = THREE.MathUtils.clamp(ps.lightSpeed ?? 0, 0, 1);
     targetColor.lerpColors(slowColor, fastColor, speedT);
 
     amb.color.lerp(targetColor, 0.15);
     dir.color.lerp(targetColor, 0.15);
 
     if (model) {
-      const target = scrollTargetRef.current;
+      const target = typeof getScrollTarget === "function" ? getScrollTarget() : 0;
       const smoothing = 0.12;
 
       const tRaw = scrollProgress + (target - scrollProgress) * smoothing;
@@ -354,41 +358,43 @@ export function createThreeScene(params) {
 
       const t = tRaw * tRaw * (3 - 2 * tRaw);
 
-      const lastIndex = MODEL_STATES.length - 1;
-      const scaled = t * lastIndex;
+      const states = Array.isArray(modelStates) && modelStates.length ? modelStates : [];
+      const lastIndex = Math.max(0, states.length - 1);
 
-      const idx0 = Math.floor(scaled);
-      const idx1 = Math.min(lastIndex, idx0 + 1);
+      if (lastIndex > 0) {
+        const scaled = t * lastIndex;
+        const idx0 = Math.floor(scaled);
+        const idx1 = Math.min(lastIndex, idx0 + 1);
+        const f = THREE.MathUtils.clamp(scaled - idx0, 0, 1);
 
-      const f = THREE.MathUtils.clamp(scaled - idx0, 0, 1);
+        const s0 = states[idx0];
+        const s1 = states[idx1];
 
-      const s0 = MODEL_STATES[idx0];
-      const s1 = MODEL_STATES[idx1];
+        const zoom = THREE.MathUtils.lerp(s0.zoom, s1.zoom, f);
+        const yShiftFactor = THREE.MathUtils.lerp(s0.yShift, s1.yShift, f);
+        const baseRotX = THREE.MathUtils.lerp(s0.rotX, s1.rotX, f);
+        const baseRotY = THREE.MathUtils.lerp(s0.rotY, s1.rotY, f);
 
-      const zoom = THREE.MathUtils.lerp(s0.zoom, s1.zoom, f);
-      const yShiftFactor = THREE.MathUtils.lerp(s0.yShift, s1.yShift, f);
-      const baseRotX = THREE.MathUtils.lerp(s0.rotX, s1.rotX, f);
-      const baseRotY = THREE.MathUtils.lerp(s0.rotY, s1.rotY, f);
+        model.scale.setScalar(baseScale * zoom);
 
-      model.scale.setScalar(baseScale * zoom);
+        const shiftY = bottomShift * yShiftFactor;
+        model.position.x = basePosition.x;
+        model.position.z = basePosition.z;
+        model.position.y = basePosition.y + shiftY;
 
-      const shiftY = bottomShift * yShiftFactor;
-      model.position.x = basePosition.x;
-      model.position.z = basePosition.z;
-      model.position.y = basePosition.y + shiftY;
+        const pr = ps.targetRotation || { x: 0, y: 0 };
+        const pointerX = pr.x || 0;
+        const pointerY = pr.y || 0;
 
-      const pointer = targetRotationRef.current || { x: 0, y: 0 };
-      const pointerX = pointer.x || 0;
-      const pointerY = pointer.y || 0;
+        const rotLerp = 0.08;
+        const pointerStrength = 0.4;
 
-      const rotLerp = 0.08;
-      const pointerStrength = 0.4;
+        const targetRotX = baseRotX + pointerX * pointerStrength;
+        const targetRotY = baseRotY + pointerStrength * pointerY;
 
-      const targetRotX = baseRotX + pointerX * pointerStrength;
-      const targetRotY = baseRotY + pointerStrength * pointerY;
-
-      model.rotation.x += (targetRotX - model.rotation.x) * rotLerp;
-      model.rotation.y += (targetRotY - model.rotation.y) * rotLerp;
+        model.rotation.x += (targetRotX - model.rotation.x) * rotLerp;
+        model.rotation.y += (targetRotY - model.rotation.y) * rotLerp;
+      }
     }
 
     renderer.render(scene, camera);
