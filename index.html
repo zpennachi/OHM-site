@@ -7,6 +7,12 @@
       content="width=device-width,initial-scale=1,viewport-fit=cover"
     />
     <title>OHM</title>
+
+    <link rel="preconnect" href="https://unpkg.com" crossorigin />
+    <link rel="dns-prefetch" href="https://unpkg.com" />
+    <link rel="preload" as="image" href="./assets/images/logo-sphere.svg" />
+    <link rel="preload" as="image" href="./assets/images/1-min.jpg" />
+
     <link rel="stylesheet" href="./styles/styles.css" />
   </head>
 
@@ -53,6 +59,15 @@
                 </p>
 
                 <button class="hero-enter" id="hero-enter">Enter</button>
+
+                <div
+                  class="hero-scroll-hint"
+                  id="hero-scroll-hint"
+                  aria-hidden="true"
+                >
+                  <span class="hero-scroll-text">Scroll</span>
+                  <span class="hero-scroll-chevron"></span>
+                </div>
               </div>
             </div>
           </section>
@@ -127,7 +142,6 @@
       <div class="footer-nav" id="footer-nav"></div>
     </div>
 
-    <!-- No bundler. Works on GitHub Pages. -->
     <script type="importmap">
       {
         "imports": {
