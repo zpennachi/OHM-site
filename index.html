@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <title>OHM</title>
+    <link rel="stylesheet" href="./styles/styles.css" />
+  </head>
+
+  <body>
+    <div class="app-root">
+      <div id="three-root" class="three-container"></div>
+
+      <div class="top-shell" id="top-shell">
+        <div class="top-inner">
+          <div class="marquee-window">
+            <div class="marquee-track">
+              <span>Music / Art / Tech / Community /&nbsp;&nbsp;</span>
+              <span>Music / Art / Tech / Community /&nbsp;&nbsp;</span>
+            </div>
+          </div>
+
+          <div class="top-email">
+            <a href="mailto:ohmalbany@gmail.com" aria-label="Email OHM">
+              <img
+                class="top-logo"
+                src="./assets/images/logo-sphere.svg"
+                alt="OHM"
+                draggable="false"
+              />
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <main class="app-main">
+        <div class="main-inner">
+          <section id="mission" class="section section-hero">
+            <div class="hero-inner">
+              <div>
+                <h1 class="hero-title">Ohm</h1>
+              </div>
+
+              <div class="hero-bottom">
+                <p class="hero-copy">
+                  OHM envisions a thriving Capital Region of New York where
+                  electronic music and arts serve as a vibrant cultural
+                  cornerstone, uniting local creatives with global talent and
+                  inspiring future generations of artists.
+                </p>
+
+                <button class="hero-enter" id="hero-enter">Enter</button>
+              </div>
+            </div>
+          </section>
+
+          <section id="contact" class="section">
+            <div class="section-inner">
+              <h2 class="section-title">Mission</h2>
+              <p class="section-body">
+                OHM is dedicated to advancing electronic art &amp; music culture
+                in Albany by providing a cutting-edge, multi-disciplinary venue
+                that acts as a creative hub and community space for residents
+                and visitors.
+                <br /><br />
+                Through fair artist compensation, innovative programming, and
+                active community engagement, our goal is to nurture a creative
+                environment that uplifts local talent, promotes skills-sharing,
+                enriches the cultural landscape, and sparks a new era of
+                creativity in the Capital Region.
+              </p>
+            </div>
+          </section>
+
+          <section id="donations" class="section">
+            <div class="section-inner">
+              <h2 class="section-title">Donations</h2>
+              <p class="section-body">
+                The OHM Organization is a grassroots nonprofit dedicated to
+                advancing electronic art and music culture in the NY Capital
+                Region.
+                <br /><br />
+                Our mission is to nurture a creative environment that uplifts
+                local talent, encourages skill-sharing, and enriches the
+                cultural landscape through collaboration across all styles and
+                art forms. We believe in building more than just events, we’re
+                cultivating a lasting community supported by positive values,
+                shared resources, and meaningful connections.
+              </p>
+
+              <button class="section-cta" id="cta-donate">Support OHM</button>
+            </div>
+          </section>
+
+          <section id="shop" class="section">
+            <div class="section-inner">
+              <h2 class="section-title">Shop</h2>
+              <p class="section-body">
+                OHM is dedicated to advancing electronic art &amp; music culture
+                in Albany by providing a cutting-edge, multi-disciplinary venue
+                that acts as a creative hub and community space for residents
+                and visitors.
+              </p>
+
+              <button class="section-cta" id="cta-shop">Buy Merch</button>
+            </div>
+          </section>
+
+          <section id="events" class="section">
+            <div class="section-inner">
+              <h2 class="section-title">Contact</h2>
+              <p class="section-body">
+                Reach out to connect with the team, share an idea, or learn more
+                about how you can get involved in building a vibrant, inclusive
+                future for electronic arts in the Capital Region.
+              </p>
+
+              <button class="section-cta" id="cta-email">Email Us</button>
+            </div>
+          </section>
+        </div>
+      </main>
+
+      <div class="footer-nav" id="footer-nav"></div>
+    </div>
+
+    <!-- No bundler. Works on GitHub Pages. -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+          "three/examples/jsm/loaders/GLTFLoader.js": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js"
+        }
+      }
+    </script>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
