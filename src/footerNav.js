@@ -1,4 +1,10 @@
-export function mountFooterNav({ items, getActiveKey, onItemHover, onItemLeave, onItemClick }) {
+export function mountFooterNav({
+  items,
+  getActiveKey,
+  onItemHover,
+  onItemLeave,
+  onItemClick
+}) {
   const root = document.getElementById("footer-nav");
   if (!root) return { dispose() {} };
 
