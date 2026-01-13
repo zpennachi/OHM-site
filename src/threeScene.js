@@ -37,7 +37,7 @@ export function createThreeScene({
   renderer.setPixelRatio(1);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.toneMappingExposure = 1.0;
   renderer.setClearColor(0x000000, 1);
 
   renderer.domElement.className = "three-canvas";
@@ -209,25 +209,25 @@ export function createThreeScene({
   window.addEventListener("touchstart", resumeOnGesture, { once: true });
   window.addEventListener("click", resumeOnGesture, { once: true });
 
+  const VIDEO_REPEAT = 4.0;
+
   const videoTexture = new THREE.VideoTexture(videoEl);
   videoTexture.colorSpace = THREE.SRGBColorSpace;
   videoTexture.minFilter = THREE.LinearFilter;
   videoTexture.magFilter = THREE.LinearFilter;
   videoTexture.generateMipmaps = false;
+  videoTexture.wrapS = THREE.RepeatWrapping;
+  videoTexture.wrapT = THREE.RepeatWrapping;
+  videoTexture.repeat.set(VIDEO_REPEAT, VIDEO_REPEAT);
+  videoTexture.offset.set(0, 0);
 
-  videoTexture.mapping = THREE.EquirectangularReflectionMapping;
-  videoTexture.wrapS = THREE.ClampToEdgeWrapping;
-  videoTexture.wrapT = THREE.ClampToEdgeWrapping;
-
-  const swirlVideoMat = new THREE.MeshPhysicalMaterial({
-    color: 0xffffff,
-    roughness: 0.18,
-    metalness: 0.0,
-    transmission: 0.0,
-    envMap: videoTexture,
-    envMapIntensity: 2.2,
+  const swirlVideoMat = new THREE.MeshStandardMaterial({
+    map: videoTexture,
     emissive: new THREE.Color(0xffffff),
-    emissiveIntensity: 0.9,
+    emissiveMap: videoTexture,
+    emissiveIntensity: 0.85,
+    roughness: 0.55,
+    metalness: 0.0,
     transparent: true,
     opacity: 1.0,
   });
@@ -237,14 +237,14 @@ export function createThreeScene({
 
   const glassMat = new THREE.MeshPhysicalMaterial({
     color: 0xffffff,
-    roughness: 0.06,
+    roughness: 0.07,
     metalness: 0.0,
     transmission: 1.0,
-    ior: 1.52,
-    thickness: 1.25,
-    envMapIntensity: 2.6,
+    ior: 1.5,
+    thickness: 1.2,
+    envMapIntensity: 2.1,
     transparent: true,
-    opacity: 0.55,
+    opacity: 1.0,
     specularIntensity: 1.0,
     specularColor: new THREE.Color(0xffffff),
     attenuationColor: new THREE.Color(0xffffff),
@@ -274,7 +274,9 @@ export function createThreeScene({
       model.traverse((child) => {
         if (!child || !child.isMesh) return;
 
-        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        const mats = Array.isArray(child.material)
+          ? child.material
+          : [child.material];
 
         let usesGlass = false;
         let usesSwirl = false;
@@ -290,18 +292,25 @@ export function createThreeScene({
           child.material = swirlVideoMat;
           child.renderOrder = 1;
           assignedSwirl++;
+
+          if (child.material && child.material.map) {
+            child.material.map.wrapS = THREE.RepeatWrapping;
+            child.material.map.wrapT = THREE.RepeatWrapping;
+            child.material.map.repeat.set(VIDEO_REPEAT, VIDEO_REPEAT);
+            child.material.map.offset.set(0, 0);
+            child.material.needsUpdate = true;
+          }
         }
 
         if (usesGlass) {
           child.material = glassMat;
           child.renderOrder = 2;
           assignedGlass++;
-        }
 
-        if (usesGlass) {
           child.material.transparent = true;
-          child.material.opacity = glassMat.opacity;
+          child.material.opacity = 1.0;
           child.material.depthWrite = false;
+          child.material.needsUpdate = true;
         }
       });
 
@@ -382,7 +391,8 @@ export function createThreeScene({
     rim.color.lerp(targetColor, 0.15);
 
     if (model) {
-      const target = typeof getScrollTarget === "function" ? getScrollTarget() : 0;
+      const target =
+        typeof getScrollTarget === "function" ? getScrollTarget() : 0;
       const smoothing = 0.12;
 
       const tRaw = scrollProgress + (target - scrollProgress) * smoothing;
@@ -390,7 +400,8 @@ export function createThreeScene({
 
       const t = tRaw * tRaw * (3 - 2 * tRaw);
 
-      const states = Array.isArray(modelStates) && modelStates.length ? modelStates : [];
+      const states =
+        Array.isArray(modelStates) && modelStates.length ? modelStates : [];
       const lastIndex = Math.max(0, states.length - 1);
 
       if (lastIndex > 0) {
