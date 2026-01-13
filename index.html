@@ -7,6 +7,7 @@
 
     <link rel="preconnect" href="https://unpkg.com" crossorigin />
     <link rel="dns-prefetch" href="https://unpkg.com" />
+
     <link rel="preload" as="image" href="./assets/images/logo-sphere.svg" />
     <link rel="preload" as="image" href="./assets/images/1-min.jpg" />
 
@@ -17,7 +18,7 @@
     <div class="app-root">
       <div id="three-root" class="three-container"></div>
 
-      <div class="top-shell" id="top-shell">
+      <div class="top-shell">
         <div class="top-inner">
           <div class="marquee-window">
             <div class="marquee-track">
@@ -27,7 +28,7 @@
           </div>
 
           <div class="top-email">
-            <a href="mailto:ohmalbany@gmail.com" aria-label="Email OHM">
+            <a href="mailto:ohmalbany@gmail.com">
               <img
                 class="top-logo"
                 src="./assets/images/logo-sphere.svg"
@@ -43,9 +44,7 @@
         <div class="main-inner">
           <section id="mission" class="section section-hero">
             <div class="hero-inner">
-              <div>
-                <h1 class="hero-title">Ohm</h1>
-              </div>
+              <h1 class="hero-title">Ohm</h1>
 
               <div class="hero-bottom">
                 <p class="hero-copy">
@@ -54,7 +53,7 @@
 
                 <button class="hero-enter" id="hero-enter">Enter</button>
 
-                <div class="hero-scroll-hint" id="hero-scroll-hint" aria-hidden="true">
+                <div class="hero-scroll-hint" aria-hidden="true">
                   <span class="hero-scroll-text">Scroll</span>
                   <span class="hero-scroll-chevron"></span>
                 </div>
@@ -67,8 +66,6 @@
               <h2 class="section-title">Mission</h2>
               <p class="section-body">
                 OHM is dedicated to advancing electronic art &amp; music culture in Albany by providing a cutting-edge, multi-disciplinary venue that acts as a creative hub and community space for residents and visitors.
-                <br /><br />
-                Through fair artist compensation, innovative programming, and active community engagement, our goal is to nurture a creative environment that uplifts local talent, promotes skills-sharing, enriches the cultural landscape, and sparks a new era of creativity in the Capital Region.
               </p>
             </div>
           </section>
@@ -78,11 +75,7 @@
               <h2 class="section-title">Donations</h2>
               <p class="section-body">
                 The OHM Organization is a grassroots nonprofit dedicated to advancing electronic art and music culture in the NY Capital Region.
-                <br /><br />
-                Our mission is to nurture a creative environment that uplifts local talent, encourages skill-sharing, and enriches the cultural landscape through collaboration across all styles and art forms.
               </p>
-
-              <button class="section-cta" id="cta-donate">Support OHM</button>
             </div>
           </section>
 
@@ -90,10 +83,8 @@
             <div class="section-inner">
               <h2 class="section-title">Shop</h2>
               <p class="section-body">
-                OHM is dedicated to advancing electronic art &amp; music culture in Albany by providing a cutting-edge, multi-disciplinary venue that acts as a creative hub and community space for residents and visitors.
+                Merchandise coming soon.
               </p>
-
-              <button class="section-cta" id="cta-shop">Buy Merch</button>
             </div>
           </section>
 
@@ -101,16 +92,14 @@
             <div class="section-inner">
               <h2 class="section-title">Contact</h2>
               <p class="section-body">
-                Reach out to connect with the team, share an idea, or learn more about how you can get involved in building a vibrant, inclusive future for electronic arts in the Capital Region.
+                Reach out to connect with the team.
               </p>
-
-              <button class="section-cta" id="cta-email">Email Us</button>
             </div>
           </section>
         </div>
       </main>
 
-      <div class="footer-nav" id="footer-nav"></div>
+      <div id="footer-nav" class="footer-nav"></div>
     </div>
 
     <script type="importmap">
