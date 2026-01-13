@@ -30,7 +30,10 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
 
   renderer.setPixelRatio(1);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
   renderer.setClearColor(0x000000, 1);
+
   renderer.domElement.className = "three-canvas";
   mountEl.appendChild(renderer.domElement);
 
@@ -39,8 +42,8 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
   function updateRendererSize() {
     const w = window.innerWidth || 1;
     const h = window.innerHeight || 1;
-    const area = w * h;
 
+    const area = w * h;
     let scale = 1;
     if (area > MAX_RENDER_PIXELS) scale = Math.sqrt(MAX_RENDER_PIXELS / area);
 
@@ -51,20 +54,21 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
 
-    log("r_size", `${rw}x${rh} (css ${w}x${h})`);
+    log("r", `${rw}x${rh}`);
   }
 
   updateRendererSize();
 
-  const gl = renderer.getContext();
-  if (!gl) err("WebGL context unavailable");
-
-  const amb = new THREE.AmbientLight(0xffffff, 0.7);
+  const amb = new THREE.AmbientLight(0xffffff, 0.85);
   scene.add(amb);
 
-  const dir = new THREE.DirectionalLight(0xffffff, 1);
+  const dir = new THREE.DirectionalLight(0xffffff, 1.15);
   dir.position.set(5, 10, 7.5);
   scene.add(dir);
+
+  const rim = new THREE.DirectionalLight(0xffffff, 0.6);
+  rim.position.set(-6, 2, -6);
+  scene.add(rim);
 
   const slowColor = new THREE.Color(0x8fd9ff);
   const fastColor = new THREE.Color(0xffffff);
@@ -88,10 +92,8 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
       cb(textureCache.get(fileName));
       return;
     }
-
     const url = asset(`images/${fileName}`);
-    log("tex_req", fileName);
-
+    log("tex", url);
     texLoader.load(
       url,
       (tex) => {
@@ -99,9 +101,7 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
         cb(tex);
       },
       undefined,
-      () => {
-        err(`Texture failed: ${fileName}`);
-      }
+      () => err(`Texture failed: ${fileName}`)
     );
   }
 
@@ -141,12 +141,15 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
   function setInitialBg(tex) {
     const t = prepEnvTexture(tex);
     scene.environment = t;
+
     bgMatA.map = t;
     bgMatB.map = t;
     bgMatA.needsUpdate = true;
     bgMatB.needsUpdate = true;
+
     bgMatA.opacity = 1;
     bgMatB.opacity = 0;
+
     fadeFromA = true;
     isFading = false;
     fadeT = 0;
@@ -166,8 +169,6 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
 
       isFading = true;
       fadeT = 0;
-
-      log("bg", fileName);
     });
   }
 
@@ -182,11 +183,11 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
   videoEl.crossOrigin = "anonymous";
   videoEl.src = asset("videos/swirl-loop.mp4");
 
+  log("vid", videoEl.src);
+
   const tryPlay = () => {
     const p = videoEl.play();
-    if (p && typeof p.then === "function") {
-      p.catch(() => {});
-    }
+    if (p && typeof p.then === "function") p.catch(() => {});
   };
 
   tryPlay();
@@ -212,24 +213,29 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
     map: videoTexture,
     emissive: new THREE.Color(0xffffff),
     emissiveMap: videoTexture,
-    emissiveIntensity: 1.35,
-    roughness: 0.35,
+    emissiveIntensity: 1.4,
+    roughness: 0.45,
     metalness: 0.0,
     transparent: true,
-    opacity: 0.95,
+    opacity: 1.0,
+    depthWrite: true,
+    depthTest: true,
   });
 
   const glassMat = new THREE.MeshPhysicalMaterial({
     color: 0xffffff,
-    roughness: 0.2,
+    roughness: 0.06,
     metalness: 0.0,
     transmission: 1.0,
-    ior: 1.5,
-    thickness: 1.0,
-    envMapIntensity: 1.6,
+    ior: 1.45,
+    thickness: 0.8,
+    envMapIntensity: 2.0,
     transparent: true,
-    opacity: 1.0,
+    opacity: 0.18,
+    specularIntensity: 1.0,
   });
+
+  glassMat.depthWrite = false;
 
   let model = null;
   let baseScale = 1;
@@ -238,42 +244,53 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
   let scrollProgress = 0;
 
   const loader = new GLTFLoader();
-
   const glbUrl = asset("models/ohm4.glb");
-  log("glb", "ohm4.glb");
+  log("glb", glbUrl);
 
   loader.load(
     glbUrl,
     (gltf) => {
       model = gltf.scene;
 
+      let assignedGlass = 0;
+      let assignedSwirl = 0;
+
       model.traverse((child) => {
         if (!child || !child.isMesh) return;
 
-        const mat = child.material;
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
 
-        if (Array.isArray(mat)) {
-          child.material = mat.map((m) => {
-            if (!m) return m;
-            const name = (m.name || "").toLowerCase();
-            if (name.includes("glass")) return glassMat;
-            if (name.includes("swirl")) {
-              child.renderOrder = 2;
-              return swirlVideoMat;
-            }
-            return m;
-          });
-        } else if (mat) {
-          const name = (mat.name || "").toLowerCase();
-          if (name.includes("glass")) {
-            child.material = glassMat;
-            child.renderOrder = 1;
-          } else if (name.includes("swirl")) {
-            child.material = swirlVideoMat;
-            child.renderOrder = 2;
-          }
+        let usesGlass = false;
+        let usesSwirl = false;
+
+        for (const m of mats) {
+          if (!m) continue;
+          const n = (m.name || "").toLowerCase();
+          if (n.includes("glass")) usesGlass = true;
+          if (n.includes("swirl")) usesSwirl = true;
+        }
+
+        if (usesSwirl) {
+          child.material = swirlVideoMat;
+          child.renderOrder = 1;
+          assignedSwirl++;
+        }
+
+        if (usesGlass) {
+          child.material = glassMat;
+          child.renderOrder = 2;
+          assignedGlass++;
+        }
+
+        if (usesGlass) {
+          child.material.transparent = true;
+          child.material.opacity = glassMat.opacity;
+          child.material.depthWrite = false;
         }
       });
+
+      log("m_glass", String(assignedGlass));
+      log("m_swirl", String(assignedSwirl));
 
       const box = new THREE.Box3().setFromObject(model);
       const size = new THREE.Vector3();
@@ -293,13 +310,9 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
       bottomShift = (size.y / 2) * scale;
 
       scene.add(model);
-
-      log("model", "loaded");
     },
     undefined,
-    () => {
-      err("GLB failed: ohm4.glb");
-    }
+    () => err("GLB failed: ohm4.glb")
   );
 
   let frameId = 0;
@@ -342,12 +355,14 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
 
     amb.intensity += (targetIntensity - amb.intensity) * liLerp;
     dir.intensity += (targetIntensity - dir.intensity) * liLerp;
+    rim.intensity += (targetIntensity - rim.intensity) * 0.08;
 
     const speedT = THREE.MathUtils.clamp(ps.lightSpeed ?? 0, 0, 1);
     targetColor.lerpColors(slowColor, fastColor, speedT);
 
     amb.color.lerp(targetColor, 0.15);
     dir.color.lerp(targetColor, 0.15);
+    rim.color.lerp(targetColor, 0.15);
 
     if (model) {
       const target = typeof getScrollTarget === "function" ? getScrollTarget() : 0;
