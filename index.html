@@ -6,39 +6,31 @@
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
-
     <title>OHM</title>
 
-    <!-- Main styles -->
+    <link rel="preconnect" href="https://unpkg.com" crossorigin />
+    <link rel="dns-prefetch" href="https://unpkg.com" />
+
+    <link rel="preload" as="image" href="./assets/images/logo-sphere.svg" />
+
     <link rel="stylesheet" href="./styles/styles.css" />
   </head>
 
   <body>
     <div class="app-root">
-      <!-- Three.js background -->
       <div id="three-root" class="three-container"></div>
 
-      <!-- Top UI -->
       <div class="top-shell">
         <div class="top-inner">
-          <!-- Marquee -->
           <div class="marquee-window">
             <div class="marquee-track">
-              <span>
-                Music / Art / Tech / Community /&nbsp;&nbsp;
-              </span>
-              <span>
-                Music / Art / Tech / Community /&nbsp;&nbsp;
-              </span>
+              <span>Music / Art / Tech / Community /&nbsp;&nbsp;</span>
+              <span>Music / Art / Tech / Community /&nbsp;&nbsp;</span>
             </div>
           </div>
 
-          <!-- Logo / Email -->
           <div class="top-email">
-            <a
-              href="mailto:ohmalbany@gmail.com?subject=Hello!"
-              aria-label="Email OHM"
-            >
+            <a href="mailto:ohmalbany@gmail.com" aria-label="Email OHM">
               <img
                 class="top-logo"
                 src="./assets/images/logo-sphere.svg"
@@ -50,16 +42,22 @@
         </div>
       </div>
 
-      <!-- Main scrollable content -->
       <main class="app-main">
         <div class="main-inner" id="sections-root"></div>
       </main>
 
-      <!-- Footer nav mount -->
       <div id="footer-nav-root"></div>
     </div>
 
-    <!-- Entry -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+          "three/examples/jsm/loaders/GLTFLoader.js": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js"
+        }
+      }
+    </script>
+
     <script type="module" src="./src/main.js"></script>
   </body>
 </html>
