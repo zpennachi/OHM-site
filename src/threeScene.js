@@ -37,11 +37,18 @@ export function createThreeScene({
   renderer.setPixelRatio(1);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  renderer.toneMappingExposure = 1.05;
   renderer.setClearColor(0x000000, 1);
+
+  renderer.physicallyCorrectLights = true;
 
   renderer.domElement.className = "three-canvas";
   mountEl.appendChild(renderer.domElement);
+
+  const pmremGen = new THREE.PMREMGenerator(renderer);
+  pmremGen.compileEquirectangularShader();
+
+  let currentEnvRT = null;
 
   const MAX_RENDER_PIXELS = 1000 * 1000;
 
@@ -65,14 +72,14 @@ export function createThreeScene({
 
   updateRendererSize();
 
-  const amb = new THREE.AmbientLight(0xffffff, 0.85);
+  const amb = new THREE.AmbientLight(0xffffff, 0.55);
   scene.add(amb);
 
-  const dir = new THREE.DirectionalLight(0xffffff, 1.15);
+  const dir = new THREE.DirectionalLight(0xffffff, 1.1);
   dir.position.set(5, 10, 7.5);
   scene.add(dir);
 
-  const rim = new THREE.DirectionalLight(0xffffff, 0.6);
+  const rim = new THREE.DirectionalLight(0xffffff, 0.7);
   rim.position.set(-6, 2, -6);
   scene.add(rim);
 
@@ -83,14 +90,34 @@ export function createThreeScene({
   const texLoader = new THREE.TextureLoader();
   const textureCache = new Map();
 
-  function prepEnvTexture(tex) {
+  function prepBgTexture(tex) {
     tex.colorSpace = THREE.SRGBColorSpace;
-    tex.mapping = THREE.EquirectangularReflectionMapping;
     tex.minFilter = THREE.LinearFilter;
     tex.magFilter = THREE.LinearFilter;
     tex.generateMipmaps = false;
     tex.needsUpdate = true;
     return tex;
+  }
+
+  function makeEnvFromEquirect(tex) {
+    const t = tex.clone();
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.mapping = THREE.EquirectangularReflectionMapping;
+    t.minFilter = THREE.LinearFilter;
+    t.magFilter = THREE.LinearFilter;
+    t.generateMipmaps = false;
+    t.needsUpdate = true;
+
+    if (currentEnvRT) {
+      try {
+        currentEnvRT.dispose();
+      } catch (_) {}
+      currentEnvRT = null;
+    }
+
+    currentEnvRT = pmremGen.fromEquirectangular(t);
+    t.dispose();
+    return currentEnvRT.texture;
   }
 
   function loadTextureFile(fileName, cb) {
@@ -145,16 +172,16 @@ export function createThreeScene({
   const fadeDuration = 0.22;
 
   function setInitialBg(tex) {
-    const t = prepEnvTexture(tex);
-    scene.environment = t;
-
-    bgMatA.map = t;
-    bgMatB.map = t;
+    const bgTex = prepBgTexture(tex);
+    bgMatA.map = bgTex;
+    bgMatB.map = bgTex;
     bgMatA.needsUpdate = true;
     bgMatB.needsUpdate = true;
 
     bgMatA.opacity = 1;
     bgMatB.opacity = 0;
+
+    scene.environment = makeEnvFromEquirect(bgTex);
 
     fadeFromA = true;
     isFading = false;
@@ -163,15 +190,16 @@ export function createThreeScene({
 
   function startCrossfadeTo(fileName) {
     loadTextureFile(fileName, (tex) => {
-      const t = prepEnvTexture(tex);
-      scene.environment = t;
+      const bgTex = prepBgTexture(tex);
 
       const fromMat = fadeFromA ? bgMatA : bgMatB;
       const toMat = fadeFromA ? bgMatB : bgMatA;
 
-      toMat.map = t;
+      toMat.map = bgTex;
       toMat.needsUpdate = true;
       toMat.opacity = 0;
+
+      scene.environment = makeEnvFromEquirect(bgTex);
 
       isFading = true;
       fadeT = 0;
@@ -209,40 +237,35 @@ export function createThreeScene({
   window.addEventListener("touchstart", resumeOnGesture, { once: true });
   window.addEventListener("click", resumeOnGesture, { once: true });
 
-  const VIDEO_REPEAT = 4.0;
-
   const videoTexture = new THREE.VideoTexture(videoEl);
   videoTexture.colorSpace = THREE.SRGBColorSpace;
   videoTexture.minFilter = THREE.LinearFilter;
   videoTexture.magFilter = THREE.LinearFilter;
   videoTexture.generateMipmaps = false;
-  videoTexture.wrapS = THREE.RepeatWrapping;
-  videoTexture.wrapT = THREE.RepeatWrapping;
-  videoTexture.repeat.set(VIDEO_REPEAT, VIDEO_REPEAT);
-  videoTexture.offset.set(0, 0);
+  videoTexture.mapping = THREE.EquirectangularReflectionMapping;
+  videoTexture.needsUpdate = true;
 
-  const swirlVideoMat = new THREE.MeshStandardMaterial({
-    map: videoTexture,
-    emissive: new THREE.Color(0xffffff),
-    emissiveMap: videoTexture,
-    emissiveIntensity: 0.85,
+  const innerMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    envMap: videoTexture,
+    envMapIntensity: 1.35,
     roughness: 0.55,
     metalness: 0.0,
-    transparent: true,
-    opacity: 1.0,
+    emissive: new THREE.Color(0xffffff),
+    emissiveMap: videoTexture,
+    emissiveIntensity: 0.55,
   });
 
-  swirlVideoMat.depthWrite = true;
-  swirlVideoMat.depthTest = true;
+  innerMat.transparent = false;
 
   const glassMat = new THREE.MeshPhysicalMaterial({
     color: 0xffffff,
-    roughness: 0.07,
+    roughness: 0.035,
     metalness: 0.0,
     transmission: 1.0,
-    ior: 1.5,
-    thickness: 1.2,
-    envMapIntensity: 2.1,
+    ior: 1.52,
+    thickness: 1.4,
+    envMapIntensity: 2.8,
     transparent: true,
     opacity: 1.0,
     specularIntensity: 1.0,
@@ -274,9 +297,7 @@ export function createThreeScene({
       model.traverse((child) => {
         if (!child || !child.isMesh) return;
 
-        const mats = Array.isArray(child.material)
-          ? child.material
-          : [child.material];
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
 
         let usesGlass = false;
         let usesSwirl = false;
@@ -289,17 +310,9 @@ export function createThreeScene({
         }
 
         if (usesSwirl) {
-          child.material = swirlVideoMat;
+          child.material = innerMat;
           child.renderOrder = 1;
           assignedSwirl++;
-
-          if (child.material && child.material.map) {
-            child.material.map.wrapS = THREE.RepeatWrapping;
-            child.material.map.wrapT = THREE.RepeatWrapping;
-            child.material.map.repeat.set(VIDEO_REPEAT, VIDEO_REPEAT);
-            child.material.map.offset.set(0, 0);
-            child.material.needsUpdate = true;
-          }
         }
 
         if (usesGlass) {
@@ -391,8 +404,7 @@ export function createThreeScene({
     rim.color.lerp(targetColor, 0.15);
 
     if (model) {
-      const target =
-        typeof getScrollTarget === "function" ? getScrollTarget() : 0;
+      const target = typeof getScrollTarget === "function" ? getScrollTarget() : 0;
       const smoothing = 0.12;
 
       const tRaw = scrollProgress + (target - scrollProgress) * smoothing;
@@ -400,8 +412,7 @@ export function createThreeScene({
 
       const t = tRaw * tRaw * (3 - 2 * tRaw);
 
-      const states =
-        Array.isArray(modelStates) && modelStates.length ? modelStates : [];
+      const states = Array.isArray(modelStates) && modelStates.length ? modelStates : [];
       const lastIndex = Math.max(0, states.length - 1);
 
       if (lastIndex > 0) {
@@ -454,6 +465,14 @@ export function createThreeScene({
   function destroy() {
     cancelAnimationFrame(frameId);
     window.removeEventListener("resize", onResize);
+
+    try {
+      pmremGen.dispose();
+    } catch (_) {}
+
+    try {
+      if (currentEnvRT) currentEnvRT.dispose();
+    } catch (_) {}
 
     try {
       videoTexture.dispose();
