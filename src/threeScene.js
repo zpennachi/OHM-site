@@ -10,13 +10,19 @@ const MODEL_STATES = [
   { zoom: 1.0, yShift: 0.0, rotX: 0.0, rotY: -3.0 },
 ];
 
-export function createThreeScene({
-  mountEl,
-  scrollTargetRef,
-  targetRotationRef,
-  lightIntensityRef,
-  lightSpeedRef,
-}) {
+function refOrDefault(r, fallback) {
+  if (r && typeof r === "object" && "current" in r) return r;
+  return { current: fallback };
+}
+
+export function createThreeScene(params) {
+  const mountEl = params?.mountEl;
+
+  const scrollTargetRef = refOrDefault(params?.scrollTargetRef, 0);
+  const targetRotationRef = refOrDefault(params?.targetRotationRef, { x: 0, y: 0 });
+  const lightIntensityRef = refOrDefault(params?.lightIntensityRef, 0.7);
+  const lightSpeedRef = refOrDefault(params?.lightSpeedRef, 0);
+
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
 
@@ -33,10 +39,20 @@ export function createThreeScene({
     powerPreference: "high-performance",
     alpha: false,
   });
+
   renderer.setPixelRatio(1);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.setClearColor(0x000000, 1);
+
   renderer.domElement.className = "three-canvas";
+
+  if (!mountEl) {
+    return {
+      startCrossfadeTo: () => {},
+      destroy: () => {},
+    };
+  }
+
   mountEl.appendChild(renderer.domElement);
 
   const MAX_RENDER_PIXELS = 1000 * 1000;
@@ -44,8 +60,8 @@ export function createThreeScene({
   function updateRendererSize() {
     const w = window.innerWidth || 1;
     const h = window.innerHeight || 1;
-    const area = w * h;
 
+    const area = w * h;
     let scale = 1;
     if (area > MAX_RENDER_PIXELS) scale = Math.sqrt(MAX_RENDER_PIXELS / area);
 
@@ -71,9 +87,9 @@ export function createThreeScene({
   const targetColor = new THREE.Color();
 
   const texLoader = new THREE.TextureLoader();
-  const textureCache = {};
+  const textureCache = new Map();
 
-  function prepEnvTexture(tex) {
+  function prepTex(tex) {
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.mapping = THREE.EquirectangularReflectionMapping;
     tex.minFilter = THREE.LinearFilter;
@@ -83,16 +99,16 @@ export function createThreeScene({
     return tex;
   }
 
-  function loadTextureFile(fileName, cb) {
-    if (textureCache[fileName]) {
-      cb(textureCache[fileName]);
+  function loadTex(fileName, cb) {
+    if (textureCache.has(fileName)) {
+      cb(textureCache.get(fileName));
       return;
     }
 
     texLoader.load(
       asset(`images/${fileName}`),
       (tex) => {
-        textureCache[fileName] = tex;
+        textureCache.set(fileName, tex);
         cb(tex);
       },
       undefined,
@@ -134,11 +150,11 @@ export function createThreeScene({
   const fadeDuration = 0.22;
 
   function setInitialBg(tex) {
-    const t = prepEnvTexture(tex);
+    const t = prepTex(tex);
     scene.environment = t;
     bgMatA.map = t;
-    bgMatA.needsUpdate = true;
     bgMatB.map = t;
+    bgMatA.needsUpdate = true;
     bgMatB.needsUpdate = true;
     bgMatA.opacity = 1;
     bgMatB.opacity = 0;
@@ -148,8 +164,8 @@ export function createThreeScene({
   }
 
   function startCrossfadeTo(fileName) {
-    loadTextureFile(fileName, (tex) => {
-      const t = prepEnvTexture(tex);
+    loadTex(fileName, (tex) => {
+      const t = prepTex(tex);
       scene.environment = t;
 
       const fromMat = fadeFromA ? bgMatA : bgMatB;
@@ -164,7 +180,7 @@ export function createThreeScene({
     });
   }
 
-  loadTextureFile("1-min.jpg", setInitialBg);
+  loadTex("1-min.jpg", setInitialBg);
 
   const videoEl = document.createElement("video");
   videoEl.muted = true;
@@ -175,28 +191,27 @@ export function createThreeScene({
   videoEl.crossOrigin = "anonymous";
   videoEl.src = asset("videos/swirl-loop.mp4");
 
-  let videoTexture = null;
-
-  function ensureVideoPlayback() {
+  const tryPlay = () => {
     const p = videoEl.play();
     if (p && typeof p.then === "function") {
-      p.catch(() => {
-        const resume = () => {
-          videoEl.play().catch(() => {});
-          window.removeEventListener("pointerdown", resume);
-          window.removeEventListener("touchstart", resume);
-          window.removeEventListener("click", resume);
-        };
-        window.addEventListener("pointerdown", resume, { once: true });
-        window.addEventListener("touchstart", resume, { once: true });
-        window.addEventListener("click", resume, { once: true });
-      });
+      p.catch(() => {});
     }
-  }
+  };
 
-  ensureVideoPlayback();
+  tryPlay();
 
-  videoTexture = new THREE.VideoTexture(videoEl);
+  const resumeOnGesture = () => {
+    tryPlay();
+    window.removeEventListener("pointerdown", resumeOnGesture);
+    window.removeEventListener("touchstart", resumeOnGesture);
+    window.removeEventListener("click", resumeOnGesture);
+  };
+
+  window.addEventListener("pointerdown", resumeOnGesture, { once: true });
+  window.addEventListener("touchstart", resumeOnGesture, { once: true });
+  window.addEventListener("click", resumeOnGesture, { once: true });
+
+  const videoTexture = new THREE.VideoTexture(videoEl);
   videoTexture.colorSpace = THREE.SRGBColorSpace;
   videoTexture.minFilter = THREE.LinearFilter;
   videoTexture.magFilter = THREE.LinearFilter;
@@ -232,6 +247,7 @@ export function createThreeScene({
   let scrollProgress = 0;
 
   const loader = new GLTFLoader();
+
   loader.load(
     asset("models/ohm4.glb"),
     (gltf) => {
@@ -301,6 +317,7 @@ export function createThreeScene({
 
     if (isFading) {
       fadeT = Math.min(1, fadeT + dt / fadeDuration);
+
       const fromMat = fadeFromA ? bgMatA : bgMatB;
       const toMat = fadeFromA ? bgMatB : bgMatA;
 
@@ -337,17 +354,16 @@ export function createThreeScene({
 
       const t = tRaw * tRaw * (3 - 2 * tRaw);
 
-      const states = MODEL_STATES;
-      const lastIndex = states.length - 1;
-
+      const lastIndex = MODEL_STATES.length - 1;
       const scaled = t * lastIndex;
+
       const idx0 = Math.floor(scaled);
       const idx1 = Math.min(lastIndex, idx0 + 1);
 
       const f = THREE.MathUtils.clamp(scaled - idx0, 0, 1);
 
-      const s0 = states[idx0];
-      const s1 = states[idx1];
+      const s0 = MODEL_STATES[idx0];
+      const s1 = MODEL_STATES[idx1];
 
       const zoom = THREE.MathUtils.lerp(s0.zoom, s1.zoom, f);
       const yShiftFactor = THREE.MathUtils.lerp(s0.yShift, s1.yShift, f);
@@ -361,8 +377,9 @@ export function createThreeScene({
       model.position.z = basePosition.z;
       model.position.y = basePosition.y + shiftY;
 
-      const pointerX = targetRotationRef.current.x;
-      const pointerY = targetRotationRef.current.y;
+      const pointer = targetRotationRef.current || { x: 0, y: 0 };
+      const pointerX = pointer.x || 0;
+      const pointerY = pointer.y || 0;
 
       const rotLerp = 0.08;
       const pointerStrength = 0.4;
@@ -390,7 +407,7 @@ export function createThreeScene({
     window.removeEventListener("resize", onResize);
 
     try {
-      if (videoTexture) videoTexture.dispose();
+      videoTexture.dispose();
     } catch (_) {}
 
     try {
@@ -406,8 +423,5 @@ export function createThreeScene({
     renderer.dispose();
   }
 
-  return {
-    startCrossfadeTo,
-    destroy,
-  };
+  return { startCrossfadeTo, destroy };
 }
