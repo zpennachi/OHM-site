@@ -1,12 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { asset } from "./utils.js";
-import {
-  swirlVertexShader,
-  swirlFragmentShader,
-  bgVertexShader,
-  bgFragmentShader,
-} from "./shaders.js";
 
 const MODEL_STATES = [
   { zoom: 1.0, yShift: 0.0, rotX: 0.0, rotY: 0.0 },
@@ -42,7 +36,6 @@ export function createThreeScene({
   renderer.setPixelRatio(1);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.setClearColor(0x000000, 1);
-
   renderer.domElement.className = "three-canvas";
   mountEl.appendChild(renderer.domElement);
 
@@ -51,8 +44,8 @@ export function createThreeScene({
   function updateRendererSize() {
     const w = window.innerWidth || 1;
     const h = window.innerHeight || 1;
-
     const area = w * h;
+
     let scale = 1;
     if (area > MAX_RENDER_PIXELS) scale = Math.sqrt(MAX_RENDER_PIXELS / area);
 
@@ -80,29 +73,6 @@ export function createThreeScene({
   const texLoader = new THREE.TextureLoader();
   const textureCache = {};
 
-  const planeGeom = new THREE.PlaneGeometry(10, 10);
-
-  const bgMaterial = new THREE.ShaderMaterial({
-    uniforms: {
-      uTexCurrent: { value: null },
-      uTexNext: { value: null },
-      uMix: { value: 0 },
-      uTime: { value: 0 },
-    },
-    vertexShader: bgVertexShader,
-    fragmentShader: bgFragmentShader,
-    transparent: false,
-    depthWrite: false,
-  });
-
-  const bgMesh = new THREE.Mesh(planeGeom, bgMaterial);
-  bgMesh.position.set(0, 0, -3);
-  scene.add(bgMesh);
-
-  let isFading = false;
-  let fadeProgress = 0;
-  const fadeDuration = 0.2;
-
   function prepEnvTexture(tex) {
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.mapping = THREE.EquirectangularReflectionMapping;
@@ -111,23 +81,6 @@ export function createThreeScene({
     tex.generateMipmaps = false;
     tex.needsUpdate = true;
     return tex;
-  }
-
-  function applyBgTexture(tex) {
-    const t = prepEnvTexture(tex);
-    scene.environment = t;
-
-    if (!bgMaterial.uniforms.uTexCurrent.value) {
-      bgMaterial.uniforms.uTexCurrent.value = t;
-      bgMaterial.uniforms.uTexNext.value = t;
-      bgMaterial.uniforms.uMix.value = 0;
-      isFading = false;
-      return;
-    }
-
-    bgMaterial.uniforms.uTexNext.value = t;
-    fadeProgress = 0;
-    isFading = true;
   }
 
   function loadTextureFile(fileName, cb) {
@@ -147,11 +100,118 @@ export function createThreeScene({
     );
   }
 
-  function startCrossfadeTo(fileName) {
-    loadTextureFile(fileName, applyBgTexture);
+  const planeGeom = new THREE.PlaneGeometry(10, 10);
+
+  const bgMatA = new THREE.MeshBasicMaterial({
+    map: null,
+    transparent: true,
+    opacity: 1,
+    depthWrite: false,
+  });
+
+  const bgMatB = new THREE.MeshBasicMaterial({
+    map: null,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+  });
+
+  const bgMeshA = new THREE.Mesh(planeGeom, bgMatA);
+  const bgMeshB = new THREE.Mesh(planeGeom, bgMatB);
+
+  bgMeshA.position.set(0, 0, -3);
+  bgMeshB.position.set(0, 0, -3);
+
+  bgMeshA.renderOrder = -10;
+  bgMeshB.renderOrder = -9;
+
+  scene.add(bgMeshA);
+  scene.add(bgMeshB);
+
+  let fadeFromA = true;
+  let isFading = false;
+  let fadeT = 0;
+  const fadeDuration = 0.22;
+
+  function setInitialBg(tex) {
+    const t = prepEnvTexture(tex);
+    scene.environment = t;
+    bgMatA.map = t;
+    bgMatA.needsUpdate = true;
+    bgMatB.map = t;
+    bgMatB.needsUpdate = true;
+    bgMatA.opacity = 1;
+    bgMatB.opacity = 0;
+    fadeFromA = true;
+    isFading = false;
+    fadeT = 0;
   }
 
-  loadTextureFile("1-min.jpg", applyBgTexture);
+  function startCrossfadeTo(fileName) {
+    loadTextureFile(fileName, (tex) => {
+      const t = prepEnvTexture(tex);
+      scene.environment = t;
+
+      const fromMat = fadeFromA ? bgMatA : bgMatB;
+      const toMat = fadeFromA ? bgMatB : bgMatA;
+
+      toMat.map = t;
+      toMat.needsUpdate = true;
+      toMat.opacity = 0;
+
+      isFading = true;
+      fadeT = 0;
+    });
+  }
+
+  loadTextureFile("1-min.jpg", setInitialBg);
+
+  const videoEl = document.createElement("video");
+  videoEl.muted = true;
+  videoEl.loop = true;
+  videoEl.playsInline = true;
+  videoEl.autoplay = true;
+  videoEl.preload = "auto";
+  videoEl.crossOrigin = "anonymous";
+  videoEl.src = asset("videos/swirl-loop.mp4");
+
+  let videoTexture = null;
+
+  function ensureVideoPlayback() {
+    const p = videoEl.play();
+    if (p && typeof p.then === "function") {
+      p.catch(() => {
+        const resume = () => {
+          videoEl.play().catch(() => {});
+          window.removeEventListener("pointerdown", resume);
+          window.removeEventListener("touchstart", resume);
+          window.removeEventListener("click", resume);
+        };
+        window.addEventListener("pointerdown", resume, { once: true });
+        window.addEventListener("touchstart", resume, { once: true });
+        window.addEventListener("click", resume, { once: true });
+      });
+    }
+  }
+
+  ensureVideoPlayback();
+
+  videoTexture = new THREE.VideoTexture(videoEl);
+  videoTexture.colorSpace = THREE.SRGBColorSpace;
+  videoTexture.minFilter = THREE.LinearFilter;
+  videoTexture.magFilter = THREE.LinearFilter;
+  videoTexture.generateMipmaps = false;
+
+  const swirlVideoMat = new THREE.MeshStandardMaterial({
+    map: videoTexture,
+    emissive: new THREE.Color(0xffffff),
+    emissiveMap: videoTexture,
+    emissiveIntensity: 1.35,
+    roughness: 0.35,
+    metalness: 0.0,
+    transparent: true,
+    opacity: 0.95,
+  });
 
   const glassMat = new THREE.MeshPhysicalMaterial({
     color: 0xffffff,
@@ -163,26 +223,6 @@ export function createThreeScene({
     envMapIntensity: 1.6,
     transparent: true,
     opacity: 1.0,
-  });
-
-  const swirlMat = new THREE.ShaderMaterial({
-    uniforms: {
-      uTime: { value: 0 },
-      uScale: { value: 3 },
-      uBrightness: { value: 2 },
-      uOpacity: { value: 0.5 },
-      uDepth: { value: 1.0 },
-      uDistortion: { value: 25.0 },
-      uSpeed: { value: 1 },
-      uCameraPos: { value: camera.position.clone() },
-    },
-    vertexShader: swirlVertexShader,
-    fragmentShader: swirlFragmentShader,
-    transparent: true,
-    depthWrite: true,
-    depthTest: true,
-    blending: THREE.NormalBlending,
-    side: THREE.FrontSide,
   });
 
   let model = null;
@@ -209,8 +249,7 @@ export function createThreeScene({
             if (name.includes("glass")) return glassMat;
             if (name.includes("swirl")) {
               child.renderOrder = 2;
-              swirlMat.depthTest = false;
-              return swirlMat;
+              return swirlVideoMat;
             }
             return m;
           });
@@ -219,11 +258,9 @@ export function createThreeScene({
           if (name.includes("glass")) {
             child.material = glassMat;
             child.renderOrder = 1;
-          }
-          if (name.includes("swirl")) {
-            child.material = swirlMat;
+          } else if (name.includes("swirl")) {
+            child.material = swirlVideoMat;
             child.renderOrder = 2;
-            swirlMat.depthTest = false;
           }
         }
       });
@@ -262,19 +299,20 @@ export function createThreeScene({
     const dt = now - lastTime;
     lastTime = now;
 
-    swirlMat.uniforms.uTime.value = now;
-    swirlMat.uniforms.uCameraPos.value.copy(camera.position);
-
-    bgMaterial.uniforms.uTime.value = now;
-
     if (isFading) {
-      fadeProgress = Math.min(1, fadeProgress + dt / fadeDuration);
-      bgMaterial.uniforms.uMix.value = fadeProgress;
+      fadeT = Math.min(1, fadeT + dt / fadeDuration);
+      const fromMat = fadeFromA ? bgMatA : bgMatB;
+      const toMat = fadeFromA ? bgMatB : bgMatA;
 
-      if (fadeProgress >= 1) {
-        bgMaterial.uniforms.uTexCurrent.value = bgMaterial.uniforms.uTexNext.value;
-        bgMaterial.uniforms.uMix.value = 0.0;
+      toMat.opacity = fadeT;
+      fromMat.opacity = 1 - fadeT;
+
+      if (fadeT >= 1) {
+        fadeFromA = !fadeFromA;
         isFading = false;
+        fadeT = 0;
+        toMat.opacity = 1;
+        fromMat.opacity = 0;
       }
     }
 
@@ -350,6 +388,16 @@ export function createThreeScene({
   function destroy() {
     cancelAnimationFrame(frameId);
     window.removeEventListener("resize", onResize);
+
+    try {
+      if (videoTexture) videoTexture.dispose();
+    } catch (_) {}
+
+    try {
+      videoEl.pause();
+      videoEl.src = "";
+      videoEl.load();
+    } catch (_) {}
 
     if (renderer.domElement && renderer.domElement.parentNode) {
       renderer.domElement.parentNode.removeChild(renderer.domElement);
