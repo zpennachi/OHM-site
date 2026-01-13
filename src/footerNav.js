@@ -3,50 +3,60 @@ export function mountFooterNav({
   getActiveKey,
   onItemHover,
   onItemLeave,
-  onItemClick
+  onItemClick,
 }) {
-  const root = document.getElementById("footer-nav");
-  if (!root) return { dispose() {} };
+  const mountEl = document.getElementById("footer-nav");
+  if (!mountEl) return;
 
-  root.innerHTML = "";
-  const btns = new Map();
+  mountEl.innerHTML = `
+    <div class="footer-nav-inner">
+      ${items
+        .map(
+          (it) =>
+            `<button class="footer-button" data-key="${it.key}" type="button">${it.label}</button>`
+        )
+        .join("")}
+    </div>
+  `;
 
-  items.forEach((item) => {
-    const btn = document.createElement("button");
-    btn.className = "footer-button";
-    btn.textContent = item.label;
+  const buttons = Array.from(mountEl.querySelectorAll(".footer-button"));
 
-    btn.addEventListener("mouseenter", () => {
-      btn.classList.add("is-hover");
-      onItemHover(item);
+  function setActive(key) {
+    for (const b of buttons) {
+      const isActive = b.getAttribute("data-key") === key;
+      b.classList.toggle("is-active", isActive);
+    }
+  }
+
+  for (const b of buttons) {
+    const key = b.getAttribute("data-key");
+
+    b.addEventListener("mouseenter", () => {
+      const item = items.find((x) => x.key === key);
+      if (item && typeof onItemHover === "function") onItemHover(item);
     });
 
-    btn.addEventListener("mouseleave", () => {
-      btn.classList.remove("is-hover");
-      onItemLeave();
+    b.addEventListener("mouseleave", () => {
+      if (typeof onItemLeave === "function") onItemLeave();
     });
 
-    btn.addEventListener("click", () => onItemClick(item.key));
-
-    root.appendChild(btn);
-    btns.set(item.key, btn);
-  });
+    b.addEventListener("click", () => {
+      if (typeof onItemClick === "function") onItemClick(key);
+    });
+  }
 
   let raf = 0;
-  const tick = () => {
-    const activeKey = getActiveKey();
-    for (const [key, btn] of btns.entries()) {
-      btn.classList.toggle("is-active", key === activeKey);
-    }
+  function tick() {
+    const key = typeof getActiveKey === "function" ? getActiveKey() : null;
+    if (key) setActive(key);
     raf = requestAnimationFrame(tick);
-  };
+  }
   tick();
 
   return {
-    dispose() {
+    destroy() {
       cancelAnimationFrame(raf);
-      root.innerHTML = "";
-      btns.clear();
-    }
+      mountEl.innerHTML = "";
+    },
   };
 }
