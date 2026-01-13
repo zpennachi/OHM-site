@@ -1,53 +1,34 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { asset, isIOSUA, isMobileUA, smoothstep01 } from "./utils.js";
+import { asset } from "./utils.js";
 import {
   swirlVertexShader,
   swirlFragmentShader,
-  swirlFragmentShaderIOS,
   bgVertexShader,
-  bgFragmentShader
+  bgFragmentShader,
 } from "./shaders.js";
 
-function ensureRecoverOverlay() {
-  let el = document.querySelector(".webgl-recover");
-  if (el) return el;
-
-  el = document.createElement("div");
-  el.className = "webgl-recover";
-  el.innerHTML = `
-    <div class="panel">
-      <h3 class="title">Rendering Paused</h3>
-      <p class="body">
-        Your browser temporarily stopped the WebGL renderer. Tap reload to continue.
-      </p>
-      <button class="btn" type="button">Reload</button>
-    </div>
-  `;
-
-  const btn = el.querySelector("button");
-  if (btn) btn.addEventListener("click", () => window.location.reload());
-
-  document.body.appendChild(el);
-  return el;
-}
+const MODEL_STATES = [
+  { zoom: 1.0, yShift: 0.0, rotX: 0.0, rotY: 0.0 },
+  { zoom: 4.0, yShift: 2.5, rotX: 0.0, rotY: 1.0 },
+  { zoom: 7.0, yShift: 2.0, rotX: 0.0, rotY: 0.0 },
+  { zoom: 5.2, yShift: 1.5, rotX: -1.15, rotY: -3.0 },
+  { zoom: 1.0, yShift: 0.0, rotX: 0.0, rotY: -3.0 },
+];
 
 export function createThreeScene({
   mountEl,
-  getScrollTarget,
-  getPointerState,
-  modelStates,
-  debugApi
+  scrollTargetRef,
+  targetRotationRef,
+  lightIntensityRef,
+  lightSpeedRef,
 }) {
-  const isIOS = isIOSUA();
-  const isMobile = isMobileUA();
-
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
 
   const camera = new THREE.PerspectiveCamera(
     45,
-    window.innerWidth / window.innerHeight,
+    (window.innerWidth || 1) / (window.innerHeight || 1),
     0.1,
     1000
   );
@@ -56,33 +37,22 @@ export function createThreeScene({
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
     powerPreference: "high-performance",
-    alpha: false
+    alpha: false,
   });
-
   renderer.setPixelRatio(1);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.setClearColor(0x000000, 1);
+
   renderer.domElement.className = "three-canvas";
   mountEl.appendChild(renderer.domElement);
-
-  const gl = renderer.getContext();
-  if (!gl) {
-    if (debugApi) debugApi.set("webgl", "no-context");
-    return {
-      startCrossfadeTo() {},
-      dispose() {}
-    };
-  }
-
-  const recoverOverlay = ensureRecoverOverlay();
 
   const MAX_RENDER_PIXELS = 1000 * 1000;
 
   function updateRendererSize() {
     const w = window.innerWidth || 1;
     const h = window.innerHeight || 1;
-    const area = w * h;
 
+    const area = w * h;
     let scale = 1;
     if (area > MAX_RENDER_PIXELS) scale = Math.sqrt(MAX_RENDER_PIXELS / area);
 
@@ -92,8 +62,6 @@ export function createThreeScene({
     renderer.setSize(rw, rh, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
-
-    if (debugApi) debugApi.set("renderer", `${rw}x${rh} (css ${w}x${h})`);
   }
 
   updateRendererSize();
@@ -111,119 +79,123 @@ export function createThreeScene({
 
   const texLoader = new THREE.TextureLoader();
   const textureCache = {};
-  const planeGeom = new THREE.PlaneGeometry(10, 10);
-  let bgMesh = null;
 
-  function prepEnvTex(tex) {
+  const planeGeom = new THREE.PlaneGeometry(10, 10);
+
+  const bgMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      uTexCurrent: { value: null },
+      uTexNext: { value: null },
+      uMix: { value: 0 },
+      uTime: { value: 0 },
+    },
+    vertexShader: bgVertexShader,
+    fragmentShader: bgFragmentShader,
+    transparent: false,
+    depthWrite: false,
+  });
+
+  const bgMesh = new THREE.Mesh(planeGeom, bgMaterial);
+  bgMesh.position.set(0, 0, -3);
+  scene.add(bgMesh);
+
+  let isFading = false;
+  let fadeProgress = 0;
+  const fadeDuration = 0.2;
+
+  function prepEnvTexture(tex) {
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.mapping = THREE.EquirectangularReflectionMapping;
     tex.minFilter = THREE.LinearFilter;
     tex.magFilter = THREE.LinearFilter;
     tex.generateMipmaps = false;
     tex.needsUpdate = true;
+    return tex;
   }
 
-  if (debugApi) debugApi.set("bg", "loading 1-min.jpg");
+  function applyBgTexture(tex) {
+    const t = prepEnvTexture(tex);
+    scene.environment = t;
 
-  texLoader.load(
-    asset("assets/images/1-min.jpg"),
-    (baseTex) => {
-      prepEnvTex(baseTex);
-      scene.environment = baseTex;
-      textureCache["1-min.jpg"] = baseTex;
-
-      if (isMobile) {
-        const bgMaterial = new THREE.MeshBasicMaterial({
-          map: baseTex,
-          color: new THREE.Color(0.18, 0.18, 0.18),
-          depthWrite: false
-        });
-        bgMesh = new THREE.Mesh(planeGeom, bgMaterial);
-        bgMesh.position.set(0, 0, -3);
-        scene.add(bgMesh);
-      } else {
-        const bgMaterial = new THREE.ShaderMaterial({
-          uniforms: {
-            uTexCurrent: { value: baseTex },
-            uTexNext: { value: baseTex },
-            uMix: { value: 0 },
-            uTime: { value: 0 }
-          },
-          vertexShader: bgVertexShader,
-          fragmentShader: bgFragmentShader,
-          transparent: false,
-          depthWrite: false
-        });
-        bgMesh = new THREE.Mesh(planeGeom, bgMaterial);
-        bgMesh.position.set(0, 0, -3);
-        scene.add(bgMesh);
-      }
-
-      if (debugApi) debugApi.set("bg", "ready 1-min.jpg");
-    },
-    undefined,
-    (err) => {
-      if (debugApi) debugApi.set("bg", "error 1-min.jpg");
-      if (debugApi) debugApi.pushErr(`Texture failed: 1-min.jpg`);
-      console.warn("Texture load failed:", asset("assets/images/1-min.jpg"), err);
+    if (!bgMaterial.uniforms.uTexCurrent.value) {
+      bgMaterial.uniforms.uTexCurrent.value = t;
+      bgMaterial.uniforms.uTexNext.value = t;
+      bgMaterial.uniforms.uMix.value = 0;
+      isFading = false;
+      return;
     }
-  );
 
-  const swirlFS = isMobile ? swirlFragmentShaderIOS : swirlFragmentShader;
-  let swirlMat = null;
+    bgMaterial.uniforms.uTexNext.value = t;
+    fadeProgress = 0;
+    isFading = true;
+  }
+
+  function loadTextureFile(fileName, cb) {
+    if (textureCache[fileName]) {
+      cb(textureCache[fileName]);
+      return;
+    }
+
+    texLoader.load(
+      asset(`images/${fileName}`),
+      (tex) => {
+        textureCache[fileName] = tex;
+        cb(tex);
+      },
+      undefined,
+      () => {}
+    );
+  }
+
+  function startCrossfadeTo(fileName) {
+    loadTextureFile(fileName, applyBgTexture);
+  }
+
+  loadTextureFile("1-min.jpg", applyBgTexture);
+
+  const glassMat = new THREE.MeshPhysicalMaterial({
+    color: 0xffffff,
+    roughness: 0.2,
+    metalness: 0.0,
+    transmission: 1.0,
+    ior: 1.5,
+    thickness: 1.0,
+    envMapIntensity: 1.6,
+    transparent: true,
+    opacity: 1.0,
+  });
+
+  const swirlMat = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uScale: { value: 3 },
+      uBrightness: { value: 2 },
+      uOpacity: { value: 0.5 },
+      uDepth: { value: 1.0 },
+      uDistortion: { value: 25.0 },
+      uSpeed: { value: 1 },
+      uCameraPos: { value: camera.position.clone() },
+    },
+    vertexShader: swirlVertexShader,
+    fragmentShader: swirlFragmentShader,
+    transparent: true,
+    depthWrite: true,
+    depthTest: true,
+    blending: THREE.NormalBlending,
+    side: THREE.FrontSide,
+  });
+
   let model = null;
   let baseScale = 1;
   const basePosition = new THREE.Vector3();
   let bottomShift = 0;
   let scrollProgress = 0;
 
-  if (debugApi) debugApi.set("glb", "loading ohm4.glb");
-
   const loader = new GLTFLoader();
   loader.load(
-    asset("assets/models/ohm4.glb"),
+    asset("models/ohm4.glb"),
     (gltf) => {
       model = gltf.scene;
-
-      const glassMat = isIOS
-        ? new THREE.MeshStandardMaterial({
-            color: 0xffffff,
-            roughness: 0.25,
-            metalness: 0.0,
-            transparent: true,
-            opacity: 0.35
-          })
-        : new THREE.MeshPhysicalMaterial({
-            color: 0xffffff,
-            roughness: 0.2,
-            metalness: 0.0,
-            transmission: 1.0,
-            ior: 1.5,
-            thickness: 1.0,
-            envMapIntensity: 1.6,
-            transparent: true,
-            opacity: 1.0
-          });
-
-      swirlMat = new THREE.ShaderMaterial({
-        uniforms: {
-          uTime: { value: 0 },
-          uScale: { value: 3 },
-          uBrightness: { value: 2 },
-          uOpacity: { value: 0.5 },
-          uDepth: { value: isIOS ? 0.7 : 1.0 },
-          uDistortion: { value: isIOS ? 16.0 : 25.0 },
-          uSpeed: { value: 1 },
-          uCameraPos: { value: camera.position.clone() }
-        },
-        vertexShader: swirlVertexShader,
-        fragmentShader: swirlFS,
-        transparent: true,
-        depthWrite: true,
-        depthTest: true,
-        blending: THREE.NormalBlending,
-        side: THREE.FrontSide
-      });
 
       model.traverse((child) => {
         if (!child || !child.isMesh) return;
@@ -235,7 +207,7 @@ export function createThreeScene({
             if (!m) return m;
             const name = (m.name || "").toLowerCase();
             if (name.includes("glass")) return glassMat;
-            if (name.includes("swirl") && swirlMat) {
+            if (name.includes("swirl")) {
               child.renderOrder = 2;
               swirlMat.depthTest = false;
               return swirlMat;
@@ -248,7 +220,7 @@ export function createThreeScene({
             child.material = glassMat;
             child.renderOrder = 1;
           }
-          if (name.includes("swirl") && swirlMat) {
+          if (name.includes("swirl")) {
             child.material = swirlMat;
             child.renderOrder = 2;
             swirlMat.depthTest = false;
@@ -266,145 +238,74 @@ export function createThreeScene({
 
       const maxSide = Math.max(size.x, size.y, size.z) || 1;
       const scale = 2 / maxSide;
-      model.scale.setScalar(scale);
 
+      model.scale.setScalar(scale);
       baseScale = scale;
       basePosition.copy(model.position);
+
       bottomShift = (size.y / 2) * scale;
 
       scene.add(model);
-
-      if (debugApi) debugApi.set("glb", "ready ohm4.glb");
     },
     undefined,
-    (err) => {
-      if (debugApi) debugApi.set("glb", "error ohm4.glb");
-      if (debugApi) debugApi.pushErr(`GLB failed: ohm4.glb`);
-      console.warn("GLB load failed:", asset("assets/models/ohm4.glb"), err);
-    }
+    () => {}
   );
-
-  let isFading = false;
-  let fadeProgress = 0;
-  const fadeDuration = 0.2;
-
-  function startCrossfadeTo(fileName) {
-    if (!bgMesh) return;
-    if (debugApi) debugApi.set("bg", `target ${fileName}`);
-
-    const applyTex = (tex) => {
-      prepEnvTex(tex);
-      scene.environment = tex;
-
-      const mat = bgMesh.material;
-      if (mat instanceof THREE.ShaderMaterial) {
-        mat.uniforms.uTexNext.value = tex;
-        fadeProgress = 0;
-        isFading = true;
-      } else if (mat instanceof THREE.MeshBasicMaterial) {
-        mat.map = tex;
-        mat.needsUpdate = true;
-        isFading = false;
-      }
-
-      if (debugApi) debugApi.set("bg", `ready ${fileName}`);
-    };
-
-    if (textureCache[fileName]) {
-      applyTex(textureCache[fileName]);
-    } else {
-      texLoader.load(
-        asset(`assets/images/${fileName}`),
-        (tex) => {
-          textureCache[fileName] = tex;
-          applyTex(tex);
-        },
-        undefined,
-        (err) => {
-          if (debugApi) debugApi.pushErr(`Texture failed: ${fileName}`);
-          console.warn("Texture load failed:", asset(`assets/images/${fileName}`), err);
-        }
-      );
-    }
-  }
 
   let frameId = 0;
   let lastTime = null;
-  let contextLost = false;
-
-  function showRecoverUI(show) {
-    recoverOverlay.style.display = show ? "flex" : "none";
-  }
-
-  function onContextLost(e) {
-    e.preventDefault();
-    contextLost = true;
-    showRecoverUI(true);
-    if (debugApi) debugApi.set("webgl", "context-lost");
-  }
-
-  function onContextRestored() {
-    contextLost = false;
-    showRecoverUI(false);
-    if (debugApi) debugApi.set("webgl", "restored (reload recommended)");
-  }
-
-  renderer.domElement.addEventListener("webglcontextlost", onContextLost, false);
-  renderer.domElement.addEventListener("webglcontextrestored", onContextRestored, false);
 
   function animate() {
     frameId = requestAnimationFrame(animate);
-    if (contextLost) return;
 
     const now = performance.now() * 0.001;
     if (lastTime == null) lastTime = now;
     const dt = now - lastTime;
     lastTime = now;
 
-    if (swirlMat) {
-      swirlMat.uniforms.uTime.value = now;
-      swirlMat.uniforms.uCameraPos.value.copy(camera.position);
-    }
+    swirlMat.uniforms.uTime.value = now;
+    swirlMat.uniforms.uCameraPos.value.copy(camera.position);
 
-    if (bgMesh) {
-      const mat = bgMesh.material;
-      if (mat instanceof THREE.ShaderMaterial) {
-        mat.uniforms.uTime.value = now;
-        if (isFading) {
-          fadeProgress = Math.min(1, fadeProgress + dt / fadeDuration);
-          mat.uniforms.uMix.value = fadeProgress;
-          if (fadeProgress >= 1) {
-            mat.uniforms.uTexCurrent.value = mat.uniforms.uTexNext.value;
-            mat.uniforms.uMix.value = 0.0;
-            isFading = false;
-          }
-        }
+    bgMaterial.uniforms.uTime.value = now;
+
+    if (isFading) {
+      fadeProgress = Math.min(1, fadeProgress + dt / fadeDuration);
+      bgMaterial.uniforms.uMix.value = fadeProgress;
+
+      if (fadeProgress >= 1) {
+        bgMaterial.uniforms.uTexCurrent.value = bgMaterial.uniforms.uTexNext.value;
+        bgMaterial.uniforms.uMix.value = 0.0;
+        isFading = false;
       }
     }
 
-    const p = getPointerState();
-    const targetIntensity = p.lightIntensity;
+    const targetIntensity = lightIntensityRef.current;
     const liLerp = 0.1;
+
     amb.intensity += (targetIntensity - amb.intensity) * liLerp;
     dir.intensity += (targetIntensity - dir.intensity) * liLerp;
 
-    const speedT = THREE.MathUtils.clamp(p.lightSpeed, 0, 1);
+    const speedT = THREE.MathUtils.clamp(lightSpeedRef.current, 0, 1);
     targetColor.lerpColors(slowColor, fastColor, speedT);
+
     amb.color.lerp(targetColor, 0.15);
     dir.color.lerp(targetColor, 0.15);
 
     if (model) {
-      const target = getScrollTarget();
+      const target = scrollTargetRef.current;
       const smoothing = 0.12;
-      scrollProgress = scrollProgress + (target - scrollProgress) * smoothing;
 
-      const t = smoothstep01(scrollProgress);
+      const tRaw = scrollProgress + (target - scrollProgress) * smoothing;
+      scrollProgress = tRaw;
 
-      const states = modelStates;
+      const t = tRaw * tRaw * (3 - 2 * tRaw);
+
+      const states = MODEL_STATES;
       const lastIndex = states.length - 1;
+
       const scaled = t * lastIndex;
       const idx0 = Math.floor(scaled);
       const idx1 = Math.min(lastIndex, idx0 + 1);
+
       const f = THREE.MathUtils.clamp(scaled - idx0, 0, 1);
 
       const s0 = states[idx0];
@@ -422,10 +323,14 @@ export function createThreeScene({
       model.position.z = basePosition.z;
       model.position.y = basePosition.y + shiftY;
 
+      const pointerX = targetRotationRef.current.x;
+      const pointerY = targetRotationRef.current.y;
+
       const rotLerp = 0.08;
       const pointerStrength = 0.4;
-      const targetRotX = baseRotX + p.targetRotation.x * pointerStrength;
-      const targetRotY = baseRotY + p.targetRotation.y * pointerStrength;
+
+      const targetRotX = baseRotX + pointerX * pointerStrength;
+      const targetRotY = baseRotY + pointerStrength * pointerY;
 
       model.rotation.x += (targetRotX - model.rotation.x) * rotLerp;
       model.rotation.y += (targetRotY - model.rotation.y) * rotLerp;
@@ -442,17 +347,19 @@ export function createThreeScene({
 
   window.addEventListener("resize", onResize);
 
+  function destroy() {
+    cancelAnimationFrame(frameId);
+    window.removeEventListener("resize", onResize);
+
+    if (renderer.domElement && renderer.domElement.parentNode) {
+      renderer.domElement.parentNode.removeChild(renderer.domElement);
+    }
+
+    renderer.dispose();
+  }
+
   return {
     startCrossfadeTo,
-    dispose() {
-      cancelAnimationFrame(frameId);
-      window.removeEventListener("resize", onResize);
-
-      renderer.domElement.removeEventListener("webglcontextlost", onContextLost);
-      renderer.domElement.removeEventListener("webglcontextrestored", onContextRestored);
-
-      if (mountEl.contains(renderer.domElement)) mountEl.removeChild(renderer.domElement);
-      renderer.dispose();
-    }
+    destroy,
   };
 }
