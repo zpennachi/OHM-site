@@ -64,7 +64,6 @@ export function createThreeScene({
 
   updateRendererSize();
 
-  // Lights (same vibe as your earlier “good” version)
   const amb = new THREE.AmbientLight(0xffffff, 0.7);
   scene.add(amb);
 
@@ -79,10 +78,9 @@ export function createThreeScene({
   const texLoader = new THREE.TextureLoader();
   const textureCache = new Map();
 
-  // IMPORTANT: this is the original “env from jpg” behavior
   function prepEnvTexture(tex) {
     tex.colorSpace = THREE.SRGBColorSpace;
-    tex.mapping = THREE.EquirectangularReflectionMapping; // key for reflective/refractiony distortion
+    tex.mapping = THREE.EquirectangularReflectionMapping;
     tex.minFilter = THREE.LinearFilter;
     tex.magFilter = THREE.LinearFilter;
     tex.generateMipmaps = false;
@@ -108,7 +106,7 @@ export function createThreeScene({
     );
   }
 
-  // Background crossfade planes
+  // ---------------- BACKGROUND PLANES (ALWAYS BEHIND) ----------------
   const planeGeom = new THREE.PlaneGeometry(10, 10);
 
   const bgMatA = new THREE.MeshBasicMaterial({
@@ -116,6 +114,7 @@ export function createThreeScene({
     transparent: true,
     opacity: 1,
     depthWrite: false,
+    depthTest: false, // key: never occlude GLB
   });
 
   const bgMatB = new THREE.MeshBasicMaterial({
@@ -123,16 +122,17 @@ export function createThreeScene({
     transparent: true,
     opacity: 0,
     depthWrite: false,
+    depthTest: false, // key: never occlude GLB
   });
 
   const bgMeshA = new THREE.Mesh(planeGeom, bgMatA);
   const bgMeshB = new THREE.Mesh(planeGeom, bgMatB);
 
-  bgMeshA.position.set(0, 0, -3);
-  bgMeshB.position.set(0, 0, -3);
+  bgMeshA.position.set(0, 0, -6);
+  bgMeshB.position.set(0, 0, -6);
 
-  bgMeshA.renderOrder = -10;
-  bgMeshB.renderOrder = -9;
+  bgMeshA.renderOrder = -999;
+  bgMeshB.renderOrder = -998;
 
   scene.add(bgMeshA);
   scene.add(bgMeshB);
@@ -144,7 +144,9 @@ export function createThreeScene({
 
   function setInitialBg(tex) {
     const t = prepEnvTexture(tex);
-    scene.environment = t; // ← THIS is what drives glass reflection/refraction
+
+    // drives refraction/reflection
+    scene.environment = t;
 
     bgMatA.map = t;
     bgMatB.map = t;
@@ -163,7 +165,7 @@ export function createThreeScene({
     loadTextureFile(fileName, (tex) => {
       const t = prepEnvTexture(tex);
 
-      // set environment immediately so glass matches the “current” section
+      // update env immediately so glass matches active section
       scene.environment = t;
 
       const toMat = fadeFromA ? bgMatB : bgMatA;
@@ -178,8 +180,7 @@ export function createThreeScene({
 
   loadTextureFile("1-min.jpg", setInitialBg);
 
-  // ---------------- VIDEO (inner) ----------------
-  // We’ll keep it simple + stable: use it as an emissive map (no blowout envMap usage).
+  // ---------------- VIDEO (INNER) ----------------
   const videoEl = document.createElement("video");
   videoEl.muted = true;
   videoEl.loop = true;
@@ -216,7 +217,6 @@ export function createThreeScene({
   videoTexture.wrapS = THREE.ClampToEdgeWrapping;
   videoTexture.wrapT = THREE.ClampToEdgeWrapping;
 
-  // inner “swirl” material: emissive video so it reads clearly behind glass
   const swirlVideoMat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     roughness: 0.85,
@@ -227,24 +227,19 @@ export function createThreeScene({
     emissiveIntensity: 0.85,
   });
 
-  swirlVideoMat.depthWrite = true;
-  swirlVideoMat.depthTest = true;
-
-  // ---------------- GLASS (outer) ----------------
-  // Match the original “perfect” vibe: opaque=1, transmission does the glass work.
+  // ---------------- GLASS (THICKER, MORE REFRACTIVE) ----------------
   const glassMat = new THREE.MeshPhysicalMaterial({
     color: 0xffffff,
-    roughness: 0.2,
+    roughness: 0.16,
     metalness: 0.0,
     transmission: 1.0,
-    ior: 1.5,
-    thickness: 1.0,
-    envMapIntensity: 1.6,
+    ior: 1.58,          // slightly higher = more bend
+    thickness: 1.8,     // thicker = more refraction “body”
+    envMapIntensity: 1.9,
     transparent: true,
     opacity: 1.0,
   });
 
-  // Usually best for glass layering
   glassMat.depthWrite = false;
 
   let model = null;
@@ -268,6 +263,9 @@ export function createThreeScene({
       model.traverse((child) => {
         if (!child || !child.isMesh) return;
 
+        // ensure model always renders after bg
+        child.renderOrder = 10;
+
         const mats = Array.isArray(child.material)
           ? child.material
           : [child.material];
@@ -284,13 +282,13 @@ export function createThreeScene({
 
         if (usesSwirl) {
           child.material = swirlVideoMat;
-          child.renderOrder = 1;
+          child.renderOrder = 11;
           assignedSwirl++;
         }
 
         if (usesGlass) {
           child.material = glassMat;
-          child.renderOrder = 2;
+          child.renderOrder = 12;
           assignedGlass++;
 
           child.material.transparent = true;
