@@ -8,14 +8,16 @@ export function smoothstep01(t) {
 }
 
 export function asset(path) {
-  // Always relative so GitHub Pages works (project pages included).
   if (path.startsWith("./")) return path;
   return `./${path.replace(/^\/+/, "")}`;
 }
 
 export function isIOSUA() {
   const ua = navigator.userAgent || "";
-  return /iPad|iPhone|iPod/.test(ua) || (ua.includes("Mac") && "ontouchend" in document);
+  return (
+    /iPad|iPhone|iPod/.test(ua) ||
+    (ua.includes("Mac") && "ontouchend" in document)
+  );
 }
 
 export function isMobileUA() {
