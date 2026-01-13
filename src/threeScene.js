@@ -2,6 +2,30 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { asset } from "./utils.js";
 
+const bgVertexShader = `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const bgFragmentShader = `
+  precision mediump float;
+  varying vec2 vUv;
+
+  uniform sampler2D uTexCurrent;
+  uniform sampler2D uTexNext;
+  uniform float uMix;
+
+  void main() {
+    vec4 c1 = texture2D(uTexCurrent, vUv);
+    vec4 c2 = texture2D(uTexNext, vUv);
+    vec4 c = mix(c1, c2, clamp(uMix, 0.0, 1.0));
+    gl_FragColor = vec4(c.rgb, 1.0);
+  }
+`;
+
 export function createThreeScene({
   mountEl,
   getScrollTarget,
@@ -106,57 +130,40 @@ export function createThreeScene({
     );
   }
 
-  // ---------------- BACKGROUND PLANES (ALWAYS BEHIND) ----------------
+  // ---------------- BACKGROUND (OPAQUE SHADER MIX) ----------------
   const planeGeom = new THREE.PlaneGeometry(10, 10);
 
-  const bgMatA = new THREE.MeshBasicMaterial({
-    map: null,
-    transparent: true,
-    opacity: 1,
+  const bgMat = new THREE.ShaderMaterial({
+    uniforms: {
+      uTexCurrent: { value: null },
+      uTexNext: { value: null },
+      uMix: { value: 0.0 },
+    },
+    vertexShader: bgVertexShader,
+    fragmentShader: bgFragmentShader,
+    transparent: false,   // key: keep it in opaque pass (renders BEFORE glass)
+    depthTest: false,
     depthWrite: false,
-    depthTest: false, // key: never occlude GLB
   });
 
-  const bgMatB = new THREE.MeshBasicMaterial({
-    map: null,
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-    depthTest: false, // key: never occlude GLB
-  });
+  const bgMesh = new THREE.Mesh(planeGeom, bgMat);
+  bgMesh.position.set(0, 0, -6);
+  bgMesh.renderOrder = -999;
+  scene.add(bgMesh);
 
-  const bgMeshA = new THREE.Mesh(planeGeom, bgMatA);
-  const bgMeshB = new THREE.Mesh(planeGeom, bgMatB);
-
-  bgMeshA.position.set(0, 0, -6);
-  bgMeshB.position.set(0, 0, -6);
-
-  bgMeshA.renderOrder = -999;
-  bgMeshB.renderOrder = -998;
-
-  scene.add(bgMeshA);
-  scene.add(bgMeshB);
-
-  let fadeFromA = true;
   let isFading = false;
   let fadeT = 0;
   const fadeDuration = 0.22;
 
   function setInitialBg(tex) {
     const t = prepEnvTexture(tex);
+    scene.environment = t; // drives glass reflections/refraction
 
-    // drives refraction/reflection
-    scene.environment = t;
+    bgMat.uniforms.uTexCurrent.value = t;
+    bgMat.uniforms.uTexNext.value = t;
+    bgMat.uniforms.uMix.value = 0.0;
 
-    bgMatA.map = t;
-    bgMatB.map = t;
-    bgMatA.needsUpdate = true;
-    bgMatB.needsUpdate = true;
-
-    bgMatA.opacity = 1;
-    bgMatB.opacity = 0;
-
-    fadeFromA = true;
+    bgMat.needsUpdate = true;
     isFading = false;
     fadeT = 0;
   }
@@ -165,13 +172,11 @@ export function createThreeScene({
     loadTextureFile(fileName, (tex) => {
       const t = prepEnvTexture(tex);
 
-      // update env immediately so glass matches active section
+      // update env immediately so glass matches active section image
       scene.environment = t;
 
-      const toMat = fadeFromA ? bgMatB : bgMatA;
-      toMat.map = t;
-      toMat.needsUpdate = true;
-      toMat.opacity = 0;
+      bgMat.uniforms.uTexNext.value = t;
+      bgMat.uniforms.uMix.value = 0.0;
 
       isFading = true;
       fadeT = 0;
@@ -227,14 +232,14 @@ export function createThreeScene({
     emissiveIntensity: 0.85,
   });
 
-  // ---------------- GLASS (THICKER, MORE REFRACTIVE) ----------------
+  // ---------------- GLASS (THICKER) ----------------
   const glassMat = new THREE.MeshPhysicalMaterial({
     color: 0xffffff,
     roughness: 0.16,
     metalness: 0.0,
     transmission: 1.0,
-    ior: 1.58,          // slightly higher = more bend
-    thickness: 1.8,     // thicker = more refraction “body”
+    ior: 1.58,
+    thickness: 2.2,          // thicker than before
     envMapIntensity: 1.9,
     transparent: true,
     opacity: 1.0,
@@ -263,9 +268,6 @@ export function createThreeScene({
       model.traverse((child) => {
         if (!child || !child.isMesh) return;
 
-        // ensure model always renders after bg
-        child.renderOrder = 10;
-
         const mats = Array.isArray(child.material)
           ? child.material
           : [child.material];
@@ -282,13 +284,13 @@ export function createThreeScene({
 
         if (usesSwirl) {
           child.material = swirlVideoMat;
-          child.renderOrder = 11;
+          child.renderOrder = 10;
           assignedSwirl++;
         }
 
         if (usesGlass) {
           child.material = glassMat;
-          child.renderOrder = 12;
+          child.renderOrder = 20;
           assignedGlass++;
 
           child.material.transparent = true;
@@ -337,19 +339,13 @@ export function createThreeScene({
 
     if (isFading) {
       fadeT = Math.min(1, fadeT + dt / fadeDuration);
-
-      const fromMat = fadeFromA ? bgMatA : bgMatB;
-      const toMat = fadeFromA ? bgMatB : bgMatA;
-
-      toMat.opacity = fadeT;
-      fromMat.opacity = 1 - fadeT;
+      bgMat.uniforms.uMix.value = fadeT;
 
       if (fadeT >= 1) {
-        fadeFromA = !fadeFromA;
+        bgMat.uniforms.uTexCurrent.value = bgMat.uniforms.uTexNext.value;
+        bgMat.uniforms.uMix.value = 0.0;
         isFading = false;
         fadeT = 0;
-        toMat.opacity = 1;
-        fromMat.opacity = 0;
       }
     }
 
