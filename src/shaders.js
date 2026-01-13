@@ -1,5 +1,6 @@
 export const swirlVertexShader = `
   varying vec3 vWorldPos;
+
   void main() {
     vec4 worldPos = modelMatrix * vec4(position, 1.0);
     vWorldPos = worldPos.xyz;
@@ -27,7 +28,8 @@ export const swirlFragmentShader = `
   vec3 hsb2rgb(in vec3 c){
     vec3 rgb = clamp(
       abs(mod(c.x * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0,
-      0.0, 1.0
+      0.0,
+      1.0
     );
     rgb = rgb * rgb * (3.0 - 2.0 * rgb);
     return c.z * mix(vec3(.5), rgb, c.y);
@@ -71,30 +73,31 @@ export const swirlFragmentShader = `
     vec3 p = pos * uScale;
     float angle = atan(p.z, p.x);
     float radius = length(p.xy);
-
     float base = radius * .01 - uTime * uSpeed;
     float n = noise3D(p * 0.2 + uTime * 0.1) * uDistortion;
     float swirl = sin(base + n) * 0.1 + 0.5;
-
     float hue = fract(angle / (2.0 * PI) + p.y * 0.5 + n * 0.1 + uTime * 0.2);
     float sat = 0.5 + 0.1 * swirl;
     float val = mix(0.25, uBrightness, swirl);
-
     return hsb2rgb(vec3(hue, sat, val));
   }
 
   void main() {
     vec3 viewDir = normalize(vWorldPos - uCameraPos);
+
     vec3 accum = vec3(0.0);
     float accumW = 0.0;
 
     const int STEPS = 3;
+
     for (int i = 0; i < STEPS; i++) {
       float tIn = float(i) / float(STEPS - 1);
       float offset = (tIn - 0.5) * uDepth;
       vec3 samplePos = vWorldPos - viewDir * offset;
+
       vec3 c = sampleRainbow(samplePos);
       float w = mix(2.0, 0.35, tIn);
+
       accum += c * w;
       accumW += w;
     }
@@ -104,44 +107,9 @@ export const swirlFragmentShader = `
   }
 `;
 
-export const swirlFragmentShaderIOS = `
-  precision mediump float;
-  precision mediump int;
-
-  varying vec3 vWorldPos;
-
-  uniform float uTime;
-  uniform float uScale;
-  uniform float uBrightness;
-  uniform float uOpacity;
-  uniform vec3  uCameraPos;
-
-  const float PI = 3.14159265;
-
-  vec3 hsb2rgb(in vec3 c){
-    vec3 rgb = clamp(
-      abs(mod(c.x * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0,
-      0.0, 1.0
-    );
-    rgb = rgb * rgb * (3.0 - 2.0 * rgb);
-    return c.z * mix(vec3(1.0), rgb, c.y);
-  }
-
-  void main() {
-    vec3 p = vWorldPos * uScale;
-    float angle = atan(p.z, p.x);
-    float radius = length(p.xy);
-    float hue = fract(angle / (2.0 * PI) + uTime * 0.12);
-    float sat = 0.8;
-    float ring = smoothstep(0.0, 1.6, radius);
-    float val = mix(0.6, uBrightness, ring);
-    vec3 color = hsb2rgb(vec3(hue, sat, val));
-    gl_FragColor = vec4(color, uOpacity);
-  }
-`;
-
 export const bgVertexShader = `
   varying vec2 vUv;
+
   void main() {
     vUv = uv;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
@@ -222,6 +190,7 @@ export const bgFragmentShader = `
 
     float radial = 1.0 - smoothstep(centerRadius, outerRadius, r);
     float center = .1 - smoothstep(centerRadius * .000075, centerRadius, r);
+
     float mask = max(clouds * radial, center);
     mask = clamp(mask, 0.0, 2.0);
 
