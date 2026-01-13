@@ -61,7 +61,6 @@ body {
   display: block;
 }
 
-/* Top overlay */
 .top-shell {
   position: fixed;
   top: 0;
@@ -135,7 +134,6 @@ body {
   padding: 6px;
 }
 
-/* Sections */
 .app-main {
   position: relative;
   z-index: 10;
@@ -233,7 +231,6 @@ body {
   line-height: 1.65;
 }
 
-/* Footer nav */
 .footer-nav {
   position: fixed;
   left: 0;
@@ -245,9 +242,18 @@ body {
   gap: 10px;
   padding: 0 16px;
   transition: opacity 200ms ease;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.footer-nav::-webkit-scrollbar {
+  display: none;
 }
 
 .footer-button {
+  flex: 0 0 auto;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(0, 0, 0, 0.35);
@@ -278,6 +284,126 @@ body {
   border-color: rgba(255, 255, 255, 0.22);
 }
 
+.hero-scroll-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  opacity: 0.7;
+  user-select: none;
+  pointer-events: none;
+}
+
+.hero-scroll-text {
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.hero-scroll-chevron {
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid rgba(255, 255, 255, 0.55);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.55);
+  transform: rotate(45deg);
+  animation: chevron-bob 1.2s ease-in-out infinite;
+}
+
+@keyframes chevron-bob {
+  0% {
+    transform: rotate(45deg) translateY(0);
+    opacity: 0.55;
+  }
+  50% {
+    transform: rotate(45deg) translateY(4px);
+    opacity: 0.95;
+  }
+  100% {
+    transform: rotate(45deg) translateY(0);
+    opacity: 0.55;
+  }
+}
+
+.debug-overlay {
+  position: fixed;
+  top: 64px;
+  left: 12px;
+  z-index: 9999;
+  width: min(420px, calc(100% - 24px));
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  padding: 12px 12px;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  font-size: 12px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.88);
+  white-space: pre-wrap;
+  pointer-events: none;
+}
+
+.debug-overlay .debug-title {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.62);
+  margin-bottom: 6px;
+}
+
+.webgl-recover {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(0, 0, 0, 0.82);
+  color: rgba(255, 255, 255, 0.92);
+  text-align: center;
+}
+
+.webgl-recover .panel {
+  width: min(560px, 100%);
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: 18px 16px;
+}
+
+.webgl-recover .title {
+  font-family: "NewRodin", "AktivGrotesk", system-ui, sans-serif;
+  font-size: 20px;
+  margin: 0 0 10px 0;
+}
+
+.webgl-recover .body {
+  margin: 0 0 14px 0;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.webgl-recover .btn {
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.5);
+  color: rgba(255, 255, 255, 0.92);
+  padding: 10px 14px;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.webgl-recover .btn:hover {
+  background: rgba(0, 0, 0, 0.7);
+}
+
 @media (max-width: 560px) {
   .top-shell {
     padding: 14px 14px;
@@ -285,7 +411,7 @@ body {
   .footer-nav {
     bottom: 14px;
     gap: 8px;
-    flex-wrap: wrap;
+    justify-content: flex-start;
   }
   .footer-button {
     padding: 9px 12px;
