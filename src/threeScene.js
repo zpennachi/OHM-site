@@ -39,7 +39,6 @@ export function createThreeScene({
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
   renderer.setClearColor(0x000000, 1);
-
   renderer.domElement.className = "three-canvas";
   mountEl.appendChild(renderer.domElement);
 
@@ -65,16 +64,13 @@ export function createThreeScene({
 
   updateRendererSize();
 
-  const amb = new THREE.AmbientLight(0xffffff, 0.9);
+  // Lights (same vibe as your earlier “good” version)
+  const amb = new THREE.AmbientLight(0xffffff, 0.7);
   scene.add(amb);
 
-  const dir = new THREE.DirectionalLight(0xffffff, 1.35);
-  dir.position.set(6, 10, 7.5);
+  const dir = new THREE.DirectionalLight(0xffffff, 1.0);
+  dir.position.set(5, 10, 7.5);
   scene.add(dir);
-
-  const rim = new THREE.DirectionalLight(0xffffff, 0.9);
-  rim.position.set(-7, 2, -7);
-  scene.add(rim);
 
   const slowColor = new THREE.Color(0x8fd9ff);
   const fastColor = new THREE.Color(0xffffff);
@@ -83,8 +79,10 @@ export function createThreeScene({
   const texLoader = new THREE.TextureLoader();
   const textureCache = new Map();
 
-  function prepBgTexture(tex) {
+  // IMPORTANT: this is the original “env from jpg” behavior
+  function prepEnvTexture(tex) {
     tex.colorSpace = THREE.SRGBColorSpace;
+    tex.mapping = THREE.EquirectangularReflectionMapping; // key for reflective/refractiony distortion
     tex.minFilter = THREE.LinearFilter;
     tex.magFilter = THREE.LinearFilter;
     tex.generateMipmaps = false;
@@ -110,6 +108,7 @@ export function createThreeScene({
     );
   }
 
+  // Background crossfade planes
   const planeGeom = new THREE.PlaneGeometry(10, 10);
 
   const bgMatA = new THREE.MeshBasicMaterial({
@@ -144,7 +143,9 @@ export function createThreeScene({
   const fadeDuration = 0.22;
 
   function setInitialBg(tex) {
-    const t = prepBgTexture(tex);
+    const t = prepEnvTexture(tex);
+    scene.environment = t; // ← THIS is what drives glass reflection/refraction
+
     bgMatA.map = t;
     bgMatB.map = t;
     bgMatA.needsUpdate = true;
@@ -160,11 +161,12 @@ export function createThreeScene({
 
   function startCrossfadeTo(fileName) {
     loadTextureFile(fileName, (tex) => {
-      const t = prepBgTexture(tex);
+      const t = prepEnvTexture(tex);
 
-      const fromMat = fadeFromA ? bgMatA : bgMatB;
+      // set environment immediately so glass matches the “current” section
+      scene.environment = t;
+
       const toMat = fadeFromA ? bgMatB : bgMatA;
-
       toMat.map = t;
       toMat.needsUpdate = true;
       toMat.opacity = 0;
@@ -176,7 +178,8 @@ export function createThreeScene({
 
   loadTextureFile("1-min.jpg", setInitialBg);
 
-  // ---------------- VIDEO ----------------
+  // ---------------- VIDEO (inner) ----------------
+  // We’ll keep it simple + stable: use it as an emissive map (no blowout envMap usage).
   const videoEl = document.createElement("video");
   videoEl.muted = true;
   videoEl.loop = true;
@@ -210,145 +213,39 @@ export function createThreeScene({
   videoTexture.minFilter = THREE.LinearFilter;
   videoTexture.magFilter = THREE.LinearFilter;
   videoTexture.generateMipmaps = false;
-  videoTexture.wrapS = THREE.RepeatWrapping;
-  videoTexture.wrapT = THREE.RepeatWrapping;
+  videoTexture.wrapS = THREE.ClampToEdgeWrapping;
+  videoTexture.wrapT = THREE.ClampToEdgeWrapping;
 
-  // This controls how “zoomed” the video appears on the inner sphere.
-  // Bigger = LESS zoom (more of the video visible).
-  const VIDEO_TILING = 0.75;
-
-  // ---------------- INNER VIDEO PROJECTION SHADER ----------------
-  // Projects the video onto the sphere using normals -> spherical UVs.
-  // This ignores the model's UVs completely, so it cannot be "zoomed in" by bad UVs.
-  const innerVideoMat = new THREE.ShaderMaterial({
-    uniforms: {
-      uVideo: { value: videoTexture },
-      uBrightness: { value: 1.0 },
-      uContrast: { value: 1.05 },
-      uSaturation: { value: 1.05 },
-      uTiling: { value: VIDEO_TILING },
-      uSpin: { value: 0.0 }, // optional rotation of mapping
-    },
-    vertexShader: `
-      varying vec3 vN;
-      varying vec3 vW;
-      void main() {
-        vec4 wp = modelMatrix * vec4(position, 1.0);
-        vW = wp.xyz;
-        vN = normalize(mat3(modelMatrix) * normal);
-        gl_Position = projectionMatrix * viewMatrix * wp;
-      }
-    `,
-    fragmentShader: `
-      precision mediump float;
-      varying vec3 vN;
-
-      uniform sampler2D uVideo;
-      uniform float uBrightness;
-      uniform float uContrast;
-      uniform float uSaturation;
-      uniform float uTiling;
-      uniform float uSpin;
-
-      const float PI = 3.14159265359;
-
-      vec3 applySaturation(vec3 c, float s) {
-        float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
-        return mix(vec3(l), c, s);
-      }
-
-      void main() {
-        vec3 n = normalize(vN);
-
-        // spherical coords
-        float u = atan(n.z, n.x) / (2.0 * PI) + 0.5;
-        float v = asin(clamp(n.y, -1.0, 1.0)) / PI + 0.5;
-
-        // optional spin around vertical axis
-        float cu = u - 0.5;
-        cu += uSpin;
-        u = cu + 0.5;
-
-        vec2 uv = vec2(u, v);
-
-        // tiling controls zoom
-        uv = (uv - 0.5) / uTiling + 0.5;
-
-        // repeat wrap
-        uv = fract(uv);
-
-        vec3 col = texture2D(uVideo, uv).rgb;
-
-        // mild grade so it doesn't blow out or wash
-        col = (col - 0.5) * uContrast + 0.5;
-        col *= uBrightness;
-        col = applySaturation(col, uSaturation);
-
-        col = clamp(col, 0.0, 1.0);
-        gl_FragColor = vec4(col, 1.0);
-      }
-    `,
-    transparent: false,
-    depthWrite: true,
-    depthTest: true,
+  // inner “swirl” material: emissive video so it reads clearly behind glass
+  const swirlVideoMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: 0.85,
+    metalness: 0.0,
+    map: videoTexture,
+    emissive: new THREE.Color(0xffffff),
+    emissiveMap: videoTexture,
+    emissiveIntensity: 0.85,
   });
 
-  // ---------------- GLASS + SURFACE SHELL ----------------
-  // Base physical glass (transmission/refraction-ish)
+  swirlVideoMat.depthWrite = true;
+  swirlVideoMat.depthTest = true;
+
+  // ---------------- GLASS (outer) ----------------
+  // Match the original “perfect” vibe: opaque=1, transmission does the glass work.
   const glassMat = new THREE.MeshPhysicalMaterial({
     color: 0xffffff,
-    roughness: 0.08,
+    roughness: 0.2,
     metalness: 0.0,
     transmission: 1.0,
-    ior: 1.52,
-    thickness: 1.6,
-    envMapIntensity: 1.0,
+    ior: 1.5,
+    thickness: 1.0,
+    envMapIntensity: 1.6,
     transparent: true,
     opacity: 1.0,
-    specularIntensity: 1.0,
-    specularColor: new THREE.Color(0xffffff),
-    clearcoat: 1.0,
-    clearcoatRoughness: 0.08,
   });
+
+  // Usually best for glass layering
   glassMat.depthWrite = false;
-  glassMat.side = THREE.DoubleSide;
-
-  // Fresnel “surface” highlight so the glass is visible even without a perfect HDR environment
-  const fresnelMat = new THREE.ShaderMaterial({
-    uniforms: {
-      uColor: { value: new THREE.Color(0xffffff) },
-      uStrength: { value: 0.65 }, // more = more visible surface
-      uPower: { value: 2.2 }, // higher = tighter rim
-    },
-    vertexShader: `
-      varying vec3 vN;
-      varying vec3 vV;
-      void main() {
-        vec4 wp = modelMatrix * vec4(position, 1.0);
-        vN = normalize(mat3(modelMatrix) * normal);
-        vV = normalize(cameraPosition - wp.xyz);
-        gl_Position = projectionMatrix * viewMatrix * wp;
-      }
-    `,
-    fragmentShader: `
-      precision mediump float;
-      varying vec3 vN;
-      varying vec3 vV;
-      uniform vec3 uColor;
-      uniform float uStrength;
-      uniform float uPower;
-
-      void main() {
-        float fres = pow(1.0 - clamp(dot(normalize(vN), normalize(vV)), 0.0, 1.0), uPower);
-        float a = fres * uStrength;
-        gl_FragColor = vec4(uColor, a);
-      }
-    `,
-    transparent: true,
-    depthWrite: false,
-    depthTest: true,
-    blending: THREE.AdditiveBlending,
-  });
 
   let model = null;
   let baseScale = 1;
@@ -367,7 +264,6 @@ export function createThreeScene({
 
       let assignedGlass = 0;
       let assignedSwirl = 0;
-      let addedShells = 0;
 
       model.traverse((child) => {
         if (!child || !child.isMesh) return;
@@ -387,7 +283,7 @@ export function createThreeScene({
         }
 
         if (usesSwirl) {
-          child.material = innerVideoMat;
+          child.material = swirlVideoMat;
           child.renderOrder = 1;
           assignedSwirl++;
         }
@@ -400,25 +296,12 @@ export function createThreeScene({
           child.material.transparent = true;
           child.material.opacity = 1.0;
           child.material.depthWrite = false;
-          child.material.side = THREE.DoubleSide;
           child.material.needsUpdate = true;
-
-          // Add a thin fresnel shell as a child mesh once
-          if (!child.userData.__hasFresnelShell) {
-            const shell = new THREE.Mesh(child.geometry, fresnelMat);
-            shell.renderOrder = 3;
-            shell.frustumCulled = false;
-            shell.scale.setScalar(1.002); // tiny expansion to avoid z-fighting
-            child.add(shell);
-            child.userData.__hasFresnelShell = true;
-            addedShells++;
-          }
         }
       });
 
       log("m_glass", String(assignedGlass));
       log("m_swirl", String(assignedSwirl));
-      log("shells", String(addedShells));
 
       const box = new THREE.Box3().setFromObject(model);
       const size = new THREE.Vector3();
@@ -484,14 +367,12 @@ export function createThreeScene({
 
     amb.intensity += (targetIntensity - amb.intensity) * liLerp;
     dir.intensity += (targetIntensity - dir.intensity) * liLerp;
-    rim.intensity += (targetIntensity - rim.intensity) * 0.08;
 
     const speedT = THREE.MathUtils.clamp(ps.lightSpeed ?? 0, 0, 1);
     targetColor.lerpColors(slowColor, fastColor, speedT);
 
     amb.color.lerp(targetColor, 0.15);
     dir.color.lerp(targetColor, 0.15);
-    rim.color.lerp(targetColor, 0.15);
 
     if (model) {
       const target = typeof getScrollTarget === "function" ? getScrollTarget() : 0;
