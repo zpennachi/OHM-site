@@ -10,15 +10,10 @@ export function createSections(navItems) {
   const root = document.getElementById("sections-root");
   if (!root) throw new Error("Missing #sections-root");
 
-  // Build sections. IMPORTANT:
-  // - data-nav="..." marks which NAV key that section belongs to
-  // - sections without data-nav are "extra" sections (video/image)
   root.innerHTML = `
     <section id="section-mission" class="section section-hero" data-nav="mission">
       <div class="hero-inner">
-        <div>
-          <h1 class="hero-title">Ohm</h1>
-        </div>
+        <div><h1 class="hero-title">Ohm</h1></div>
         <div class="hero-bottom">
           <p class="hero-copy">
             OHM envisions a thriving Capital Region of New York where electronic music and arts serve as a vibrant cultural cornerstone,
@@ -93,67 +88,104 @@ export function createSections(navItems) {
   `;
 
   const sections = Array.from(root.querySelectorAll("section.section"));
-
   const navKeySet = new Set(navItems.map((i) => i.key));
 
-  function getSectionIndexFromScroll() {
-    const viewportH = window.innerHeight || 1;
-    const idxFloat = (window.scrollY + viewportH * 0.5) / viewportH;
-    let idx = Math.floor(idxFloat);
-    idx = Math.max(0, Math.min(sections.length - 1, idx));
-    return idx;
+  let sectionTops = [];
+  let navKeyToIndex = new Map();
+
+  function recomputeLayoutMaps() {
+    sectionTops = sections.map((s) => s.offsetTop);
+
+    navKeyToIndex = new Map();
+    for (let i = 0; i < sections.length; i++) {
+      const k = sections[i].getAttribute("data-nav");
+      if (k && navKeySet.has(k) && !navKeyToIndex.has(k)) navKeyToIndex.set(k, i);
+    }
   }
 
-  function deriveActiveNavKey(centerIdx) {
-    // If the centered section has a nav key, use it.
-    const centered = sections[centerIdx];
-    const direct = centered?.getAttribute("data-nav");
+  function getScrollableHeight() {
+    const doc = document.documentElement;
+    const body = document.body;
+    const full = Math.max(
+      body.scrollHeight,
+      body.offsetHeight,
+      doc.clientHeight,
+      doc.scrollHeight,
+      doc.offsetHeight
+    );
+    return Math.max(1, full - window.innerHeight);
+  }
+
+  function deriveActiveNavKeyByViewportCenter() {
+    const centerY = window.innerHeight * 0.5;
+
+    let bestIdx = 0;
+    let bestDist = Infinity;
+
+    for (let i = 0; i < sections.length; i++) {
+      const r = sections[i].getBoundingClientRect();
+      const sectionCenter = r.top + r.height * 0.5;
+      const d = Math.abs(sectionCenter - centerY);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = i;
+      }
+    }
+
+    const direct = sections[bestIdx].getAttribute("data-nav");
     if (direct && navKeySet.has(direct)) return direct;
 
-    // Otherwise, walk backward to find the most recent nav section.
-    for (let i = centerIdx; i >= 0; i--) {
+    for (let i = bestIdx; i >= 0; i--) {
       const k = sections[i].getAttribute("data-nav");
       if (k && navKeySet.has(k)) return k;
     }
 
-    // Fallback
     return navItems[0]?.key || "mission";
   }
 
   function handleScroll() {
+    const scrollable = getScrollableHeight();
+    state.scrollTarget = clamp01(window.scrollY / scrollable);
+
     const viewportH = window.innerHeight || 1;
-
-    // scrollTarget should span ALL sections (including video/image)
-    const totalScrollable = viewportH * (sections.length - 1);
-    const rawT = totalScrollable > 0 ? window.scrollY / totalScrollable : 0;
-    state.scrollTarget = clamp01(rawT);
-
-    // heroProgress still just first viewport
     state.heroProgress = clamp01(window.scrollY / Math.max(viewportH, 1));
 
-    const idx = getSectionIndexFromScroll();
-    const navKey = deriveActiveNavKey(idx);
+    const navKey = deriveActiveNavKeyByViewportCenter();
     if (navKey !== state.activeKey) state.activeKey = navKey;
   }
 
-  handleScroll();
-  window.addEventListener("scroll", handleScroll, { passive: true });
-
   function handleNavClick(key) {
-    // Scroll to the section that has data-nav=key
-    const idx = sections.findIndex((s) => s.getAttribute("data-nav") === key);
-    if (idx >= 0) {
-      const viewportH = window.innerHeight || 1;
-      window.scrollTo({ top: idx * viewportH, behavior: "smooth" });
-      state.activeKey = key;
-    }
+    if (!navKeyToIndex.has(key)) return;
+
+    const idx = navKeyToIndex.get(key);
+    const y = sectionTops[idx] ?? 0;
+
+    window.scrollTo({ top: y, behavior: "smooth" });
+    state.activeKey = key;
   }
+
+  const onResize = () => {
+    recomputeLayoutMaps();
+    handleScroll();
+  };
+
+  recomputeLayoutMaps();
+  handleScroll();
+
+  window.addEventListener("scroll", handleScroll, { passive: true });
+  window.addEventListener("resize", onResize);
+
+  // In case fonts/media shift layout after load
+  setTimeout(onResize, 0);
+  setTimeout(onResize, 250);
+  setTimeout(onResize, 1000);
 
   return {
     state,
     handleNavClick,
     dispose() {
       window.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("resize", onResize);
     },
   };
 }
