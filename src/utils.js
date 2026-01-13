@@ -8,8 +8,10 @@ export function smoothstep01(t) {
 }
 
 export function asset(path) {
-  if (path.startsWith("./")) return path;
-  return `./${path.replace(/^\/+/, "")}`;
+  const p = String(path || "").replace(/^\/+/, "");
+  if (p.startsWith("./")) return p;
+  if (p.startsWith("assets/")) return `./${p}`;
+  return `./assets/${p}`;
 }
 
 export function isIOSUA() {
