@@ -90,11 +90,50 @@ export function createSections(navItems) {
   const sections = Array.from(root.querySelectorAll("section.section"));
   const navKeySet = new Set(navItems.map((i) => i.key));
 
+  // Pick the real scroll container (window OR .app-main)
+  function getScrollEl() {
+    const main = document.querySelector(".app-main");
+    if (main && main.scrollHeight > main.clientHeight + 2) return main;
+    return document.scrollingElement || document.documentElement;
+  }
+
+  let scrollEl = getScrollEl();
   let sectionTops = [];
   let navKeyToIndex = new Map();
 
+  function getScrollTop() {
+    return scrollEl === document.scrollingElement || scrollEl === document.documentElement
+      ? window.scrollY || 0
+      : scrollEl.scrollTop || 0;
+  }
+
+  function getViewportH() {
+    return scrollEl === document.scrollingElement || scrollEl === document.documentElement
+      ? window.innerHeight || 1
+      : scrollEl.clientHeight || 1;
+  }
+
+  function getScrollable() {
+    const vh = getViewportH();
+    const sh =
+      scrollEl === document.scrollingElement || scrollEl === document.documentElement
+        ? (document.documentElement.scrollHeight || 1)
+        : (scrollEl.scrollHeight || 1);
+    return Math.max(1, sh - vh);
+  }
+
   function recomputeLayoutMaps() {
-    sectionTops = sections.map((s) => s.offsetTop);
+    // If scrolling is inside .app-main, offsets should be relative to that container
+    const base =
+      scrollEl === document.scrollingElement || scrollEl === document.documentElement
+        ? 0
+        : scrollEl.getBoundingClientRect().top;
+
+    sectionTops = sections.map((s) => {
+      const r = s.getBoundingClientRect();
+      const pageY = r.top - base + getScrollTop();
+      return pageY;
+    });
 
     navKeyToIndex = new Map();
     for (let i = 0; i < sections.length; i++) {
@@ -103,28 +142,20 @@ export function createSections(navItems) {
     }
   }
 
-  function getScrollableHeight() {
-    const doc = document.documentElement;
-    const body = document.body;
-    const full = Math.max(
-      body.scrollHeight,
-      body.offsetHeight,
-      doc.clientHeight,
-      doc.scrollHeight,
-      doc.offsetHeight
-    );
-    return Math.max(1, full - window.innerHeight);
-  }
-
-  function deriveActiveNavKeyByViewportCenter() {
-    const centerY = window.innerHeight * 0.5;
+  function deriveActiveNavKeyByCenter() {
+    const centerY = getViewportH() * 0.5;
 
     let bestIdx = 0;
     let bestDist = Infinity;
 
+    const containerTop =
+      scrollEl === document.scrollingElement || scrollEl === document.documentElement
+        ? 0
+        : scrollEl.getBoundingClientRect().top;
+
     for (let i = 0; i < sections.length; i++) {
       const r = sections[i].getBoundingClientRect();
-      const sectionCenter = r.top + r.height * 0.5;
+      const sectionCenter = (r.top - containerTop) + r.height * 0.5;
       const d = Math.abs(sectionCenter - centerY);
       if (d < bestDist) {
         bestDist = d;
@@ -132,7 +163,7 @@ export function createSections(navItems) {
       }
     }
 
-    const direct = sections[bestIdx].getAttribute("data-nav");
+    const direct = sections[bestIdx]?.getAttribute("data-nav");
     if (direct && navKeySet.has(direct)) return direct;
 
     for (let i = bestIdx; i >= 0; i--) {
@@ -144,24 +175,57 @@ export function createSections(navItems) {
   }
 
   function handleScroll() {
-    const scrollable = getScrollableHeight();
-    state.scrollTarget = clamp01(window.scrollY / scrollable);
+    // Re-detect scroll container in case CSS changed
+    const next = getScrollEl();
+    if (next !== scrollEl) {
+      detachScroll();
+      scrollEl = next;
+      attachScroll();
+      recomputeLayoutMaps();
+    }
 
-    const viewportH = window.innerHeight || 1;
-    state.heroProgress = clamp01(window.scrollY / Math.max(viewportH, 1));
+    const st = getScrollTop();
+    const scrollable = getScrollable();
 
-    const navKey = deriveActiveNavKeyByViewportCenter();
+    state.scrollTarget = clamp01(st / scrollable);
+
+    const vh = getViewportH();
+    state.heroProgress = clamp01(st / Math.max(vh, 1));
+
+    const navKey = deriveActiveNavKeyByCenter();
     if (navKey !== state.activeKey) state.activeKey = navKey;
+  }
+
+  function scrollToY(y) {
+    if (scrollEl === document.scrollingElement || scrollEl === document.documentElement) {
+      window.scrollTo({ top: y, behavior: "smooth" });
+    } else {
+      scrollEl.scrollTo({ top: y, behavior: "smooth" });
+    }
   }
 
   function handleNavClick(key) {
     if (!navKeyToIndex.has(key)) return;
-
     const idx = navKeyToIndex.get(key);
     const y = sectionTops[idx] ?? 0;
-
-    window.scrollTo({ top: y, behavior: "smooth" });
+    scrollToY(y);
     state.activeKey = key;
+  }
+
+  function attachScroll() {
+    if (scrollEl === document.scrollingElement || scrollEl === document.documentElement) {
+      window.addEventListener("scroll", handleScroll, { passive: true });
+    } else {
+      scrollEl.addEventListener("scroll", handleScroll, { passive: true });
+    }
+  }
+
+  function detachScroll() {
+    if (scrollEl === document.scrollingElement || scrollEl === document.documentElement) {
+      window.removeEventListener("scroll", handleScroll);
+    } else {
+      scrollEl.removeEventListener("scroll", handleScroll);
+    }
   }
 
   const onResize = () => {
@@ -172,10 +236,10 @@ export function createSections(navItems) {
   recomputeLayoutMaps();
   handleScroll();
 
-  window.addEventListener("scroll", handleScroll, { passive: true });
+  attachScroll();
   window.addEventListener("resize", onResize);
 
-  // In case fonts/media shift layout after load
+  // layout shifts (fonts/video)
   setTimeout(onResize, 0);
   setTimeout(onResize, 250);
   setTimeout(onResize, 1000);
@@ -184,7 +248,7 @@ export function createSections(navItems) {
     state,
     handleNavClick,
     dispose() {
-      window.removeEventListener("scroll", handleScroll);
+      detachScroll();
       window.removeEventListener("resize", onResize);
     },
   };
