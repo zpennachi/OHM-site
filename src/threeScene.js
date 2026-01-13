@@ -183,54 +183,69 @@ export function createThreeScene({
     });
   }
 
-  loadTextureFile("1-min.jpg", setInitialBg);
+// ---------------- VIDEO (INNER) ----------------
+const videoEl = document.createElement("video");
+videoEl.muted = true;
+videoEl.loop = true;
+videoEl.playsInline = true;
+videoEl.autoplay = true;
+videoEl.preload = "auto";
+videoEl.crossOrigin = "anonymous";
+videoEl.src = asset("videos/swirl-loop.mp4");
 
-  // ---------------- VIDEO (INNER) ----------------
-  const videoEl = document.createElement("video");
-  videoEl.muted = true;
-  videoEl.loop = true;
-  videoEl.playsInline = true;
-  videoEl.autoplay = true;
-  videoEl.preload = "auto";
-  videoEl.crossOrigin = "anonymous";
-  videoEl.src = asset("videos/swirl-loop.mp4");
-  log("vid", videoEl.src);
+const tryPlay = () => {
+  const p = videoEl.play();
+  if (p && typeof p.then === "function") p.catch(() => {});
+};
+tryPlay();
 
-  const tryPlay = () => {
-    const p = videoEl.play();
-    if (p && typeof p.then === "function") p.catch(() => {});
-  };
-
+const resumeOnGesture = () => {
   tryPlay();
+  window.removeEventListener("pointerdown", resumeOnGesture);
+  window.removeEventListener("touchstart", resumeOnGesture);
+  window.removeEventListener("click", resumeOnGesture);
+};
 
-  const resumeOnGesture = () => {
-    tryPlay();
-    window.removeEventListener("pointerdown", resumeOnGesture);
-    window.removeEventListener("touchstart", resumeOnGesture);
-    window.removeEventListener("click", resumeOnGesture);
-  };
+window.addEventListener("pointerdown", resumeOnGesture, { once: true });
+window.addEventListener("touchstart", resumeOnGesture, { once: true });
+window.addEventListener("click", resumeOnGesture, { once: true });
 
-  window.addEventListener("pointerdown", resumeOnGesture, { once: true });
-  window.addEventListener("touchstart", resumeOnGesture, { once: true });
-  window.addEventListener("click", resumeOnGesture, { once: true });
+const videoTexture = new THREE.VideoTexture(videoEl);
 
-  const videoTexture = new THREE.VideoTexture(videoEl);
-  videoTexture.colorSpace = THREE.SRGBColorSpace;
-  videoTexture.minFilter = THREE.LinearFilter;
-  videoTexture.magFilter = THREE.LinearFilter;
-  videoTexture.generateMipmaps = false;
-  videoTexture.wrapS = THREE.ClampToEdgeWrapping;
-  videoTexture.wrapT = THREE.ClampToEdgeWrapping;
+// IMPORTANT: video is already "color" data, not light.
+// Keep it SRGB so it matches your JPG env + UI.
+videoTexture.colorSpace = THREE.SRGBColorSpace;
 
-  const swirlVideoMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    roughness: 0.85,
-    metalness: 0.0,
-    map: videoTexture,
-    emissive: new THREE.Color(0xffffff),
-    emissiveMap: videoTexture,
-    emissiveIntensity: 0.85,
-  });
+// Filtering + no mipmaps for video
+videoTexture.minFilter = THREE.LinearFilter;
+videoTexture.magFilter = THREE.LinearFilter;
+videoTexture.generateMipmaps = false;
+
+// Try to "de-zoom" without touching the GLB by widening sampling.
+// These values are safe to tweak live.
+videoTexture.wrapS = THREE.RepeatWrapping;
+videoTexture.wrapT = THREE.RepeatWrapping;
+
+// < 1.0 = zoom OUT (shows more of the texture)
+// > 1.0 = zoom IN
+videoTexture.repeat.set(0.55, 0.55);
+
+// Center it
+videoTexture.offset.set(0.5 - 0.5 * videoTexture.repeat.x, 0.5 - 0.5 * videoTexture.repeat.y);
+
+// Plain material: no emissive, no envMap hack.
+// Use Standard for predictable tonemapping response.
+const swirlVideoMat = new THREE.MeshStandardMaterial({
+  map: videoTexture,
+  color: 0xffffff,
+  roughness: 0.65,
+  metalness: 0.0,
+  transparent: false,
+});
+
+// Optional: if it still feels bright under ACES, pull it down a bit
+swirlVideoMat.color.setScalar(0.85);
+
 
   // ---------------- GLASS (THICKER) ----------------
   const glassMat = new THREE.MeshPhysicalMaterial({
