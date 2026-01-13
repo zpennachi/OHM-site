@@ -182,8 +182,6 @@ export function createThreeScene({
       fadeT = 0;
     });
   }
-
-// ---------------- VIDEO (INNER) ----------------
 const videoEl = document.createElement("video");
 videoEl.muted = true;
 videoEl.loop = true;
@@ -205,47 +203,74 @@ const resumeOnGesture = () => {
   window.removeEventListener("touchstart", resumeOnGesture);
   window.removeEventListener("click", resumeOnGesture);
 };
-
 window.addEventListener("pointerdown", resumeOnGesture, { once: true });
 window.addEventListener("touchstart", resumeOnGesture, { once: true });
 window.addEventListener("click", resumeOnGesture, { once: true });
 
 const videoTexture = new THREE.VideoTexture(videoEl);
-
-// IMPORTANT: video is already "color" data, not light.
-// Keep it SRGB so it matches your JPG env + UI.
 videoTexture.colorSpace = THREE.SRGBColorSpace;
-
-// Filtering + no mipmaps for video
 videoTexture.minFilter = THREE.LinearFilter;
 videoTexture.magFilter = THREE.LinearFilter;
 videoTexture.generateMipmaps = false;
+videoTexture.wrapS = THREE.ClampToEdgeWrapping;
+videoTexture.wrapT = THREE.ClampToEdgeWrapping;
 
-// Try to "de-zoom" without touching the GLB by widening sampling.
-// These values are safe to tweak live.
-videoTexture.wrapS = THREE.RepeatWrapping;
-videoTexture.wrapT = THREE.RepeatWrapping;
+const swirlVideoMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uTex: { value: videoTexture },
+    uStrength: { value: 1.0 },
+    uExposure: { value: 0.85 },
+    uRotate: { value: 0.0 },
+  },
+  vertexShader: `
+    varying vec3 vObjPos;
+    void main() {
+      vObjPos = position;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    precision mediump float;
 
-// < 1.0 = zoom OUT (shows more of the texture)
-// > 1.0 = zoom IN
-videoTexture.repeat.set(0.55, 0.55);
+    uniform sampler2D uTex;
+    uniform float uExposure;
+    uniform float uRotate;
 
-// Center it
-videoTexture.offset.set(0.5 - 0.5 * videoTexture.repeat.x, 0.5 - 0.5 * videoTexture.repeat.y);
+    varying vec3 vObjPos;
 
-// Plain material: no emissive, no envMap hack.
-// Use Standard for predictable tonemapping response.
-const swirlVideoMat = new THREE.MeshStandardMaterial({
-  map: videoTexture,
-  color: 0xffffff,
-  roughness: 0.65,
-  metalness: 0.0,
+    const float PI = 3.14159265358979323846264;
+
+    vec2 rot2(vec2 p, float a) {
+      float c = cos(a), s = sin(a);
+      return vec2(c*p.x - s*p.y, s*p.x + c*p.y);
+    }
+
+    void main() {
+      vec3 p = normalize(vObjPos);
+
+      float lon = atan(p.z, p.x);
+      float lat = asin(clamp(p.y, -1.0, 1.0));
+
+      float u = (lon / (2.0 * PI)) + 0.5;
+      float v = (lat / PI) + 0.5;
+
+      vec2 uv = vec2(u, v);
+
+      uv = uv - 0.5;
+      uv = rot2(uv, uRotate);
+      uv = uv + 0.5;
+
+      vec3 col = texture2D(uTex, uv).rgb;
+
+      col *= uExposure;
+
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `,
   transparent: false,
+  depthWrite: true,
+  depthTest: true,
 });
-
-// Optional: if it still feels bright under ACES, pull it down a bit
-swirlVideoMat.color.setScalar(0.85);
-
 
   // ---------------- GLASS (THICKER) ----------------
   const glassMat = new THREE.MeshPhysicalMaterial({
