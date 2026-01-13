@@ -9,14 +9,48 @@ import {
   bgFragmentShader
 } from "./shaders.js";
 
-export function createThreeScene({ mountEl, getScrollTarget, getPointerState, modelStates }) {
+function ensureRecoverOverlay() {
+  let el = document.querySelector(".webgl-recover");
+  if (el) return el;
+
+  el = document.createElement("div");
+  el.className = "webgl-recover";
+  el.innerHTML = `
+    <div class="panel">
+      <h3 class="title">Rendering Paused</h3>
+      <p class="body">
+        Your browser temporarily stopped the WebGL renderer. Tap reload to continue.
+      </p>
+      <button class="btn" type="button">Reload</button>
+    </div>
+  `;
+
+  const btn = el.querySelector("button");
+  if (btn) btn.addEventListener("click", () => window.location.reload());
+
+  document.body.appendChild(el);
+  return el;
+}
+
+export function createThreeScene({
+  mountEl,
+  getScrollTarget,
+  getPointerState,
+  modelStates,
+  debugApi
+}) {
   const isIOS = isIOSUA();
   const isMobile = isMobileUA();
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
 
-  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+  const camera = new THREE.PerspectiveCamera(
+    45,
+    window.innerWidth / window.innerHeight,
+    0.1,
+    1000
+  );
   camera.position.set(0, 0, 5);
 
   const renderer = new THREE.WebGLRenderer({
@@ -33,9 +67,14 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
 
   const gl = renderer.getContext();
   if (!gl) {
-    console.warn("WebGL context not available");
-    return { startCrossfadeTo() {}, dispose() {} };
+    if (debugApi) debugApi.set("webgl", "no-context");
+    return {
+      startCrossfadeTo() {},
+      dispose() {}
+    };
   }
+
+  const recoverOverlay = ensureRecoverOverlay();
 
   const MAX_RENDER_PIXELS = 1000 * 1000;
 
@@ -53,11 +92,12 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
     renderer.setSize(rw, rh, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+
+    if (debugApi) debugApi.set("renderer", `${rw}x${rh} (css ${w}x${h})`);
   }
 
   updateRendererSize();
 
-  // Lights
   const amb = new THREE.AmbientLight(0xffffff, 0.7);
   scene.add(amb);
 
@@ -69,7 +109,6 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
   const fastColor = new THREE.Color(0xffffff);
   const targetColor = new THREE.Color();
 
-  // Background
   const texLoader = new THREE.TextureLoader();
   const textureCache = {};
   const planeGeom = new THREE.PlaneGeometry(10, 10);
@@ -83,6 +122,8 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
     tex.generateMipmaps = false;
     tex.needsUpdate = true;
   }
+
+  if (debugApi) debugApi.set("bg", "loading 1-min.jpg");
 
   texLoader.load(
     asset("assets/images/1-min.jpg"),
@@ -117,12 +158,17 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
         bgMesh.position.set(0, 0, -3);
         scene.add(bgMesh);
       }
+
+      if (debugApi) debugApi.set("bg", "ready 1-min.jpg");
     },
     undefined,
-    (err) => console.warn("Texture load failed:", asset("assets/images/1-min.jpg"), err)
+    (err) => {
+      if (debugApi) debugApi.set("bg", "error 1-min.jpg");
+      if (debugApi) debugApi.pushErr(`Texture failed: 1-min.jpg`);
+      console.warn("Texture load failed:", asset("assets/images/1-min.jpg"), err);
+    }
   );
 
-  // Model
   const swirlFS = isMobile ? swirlFragmentShaderIOS : swirlFragmentShader;
   let swirlMat = null;
   let model = null;
@@ -130,6 +176,8 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
   const basePosition = new THREE.Vector3();
   let bottomShift = 0;
   let scrollProgress = 0;
+
+  if (debugApi) debugApi.set("glb", "loading ohm4.glb");
 
   const loader = new GLTFLoader();
   loader.load(
@@ -225,18 +273,24 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
       bottomShift = (size.y / 2) * scale;
 
       scene.add(model);
+
+      if (debugApi) debugApi.set("glb", "ready ohm4.glb");
     },
     undefined,
-    (err) => console.warn("GLB load failed:", asset("assets/models/ohm4.glb"), err)
+    (err) => {
+      if (debugApi) debugApi.set("glb", "error ohm4.glb");
+      if (debugApi) debugApi.pushErr(`GLB failed: ohm4.glb`);
+      console.warn("GLB load failed:", asset("assets/models/ohm4.glb"), err);
+    }
   );
 
-  // Crossfade
   let isFading = false;
   let fadeProgress = 0;
   const fadeDuration = 0.2;
 
   function startCrossfadeTo(fileName) {
     if (!bgMesh) return;
+    if (debugApi) debugApi.set("bg", `target ${fileName}`);
 
     const applyTex = (tex) => {
       prepEnvTex(tex);
@@ -252,6 +306,8 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
         mat.needsUpdate = true;
         isFading = false;
       }
+
+      if (debugApi) debugApi.set("bg", `ready ${fileName}`);
     };
 
     if (textureCache[fileName]) {
@@ -264,30 +320,52 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
           applyTex(tex);
         },
         undefined,
-        (err) => console.warn("Texture load failed:", asset(`assets/images/${fileName}`), err)
+        (err) => {
+          if (debugApi) debugApi.pushErr(`Texture failed: ${fileName}`);
+          console.warn("Texture load failed:", asset(`assets/images/${fileName}`), err);
+        }
       );
     }
   }
 
-  // Render loop
   let frameId = 0;
   let lastTime = null;
+  let contextLost = false;
+
+  function showRecoverUI(show) {
+    recoverOverlay.style.display = show ? "flex" : "none";
+  }
+
+  function onContextLost(e) {
+    e.preventDefault();
+    contextLost = true;
+    showRecoverUI(true);
+    if (debugApi) debugApi.set("webgl", "context-lost");
+  }
+
+  function onContextRestored() {
+    contextLost = false;
+    showRecoverUI(false);
+    if (debugApi) debugApi.set("webgl", "restored (reload recommended)");
+  }
+
+  renderer.domElement.addEventListener("webglcontextlost", onContextLost, false);
+  renderer.domElement.addEventListener("webglcontextrestored", onContextRestored, false);
 
   function animate() {
     frameId = requestAnimationFrame(animate);
+    if (contextLost) return;
 
     const now = performance.now() * 0.001;
     if (lastTime == null) lastTime = now;
     const dt = now - lastTime;
     lastTime = now;
 
-    // Swirl uniforms
     if (swirlMat) {
       swirlMat.uniforms.uTime.value = now;
       swirlMat.uniforms.uCameraPos.value.copy(camera.position);
     }
 
-    // BG shader time + crossfade
     if (bgMesh) {
       const mat = bgMesh.material;
       if (mat instanceof THREE.ShaderMaterial) {
@@ -304,7 +382,6 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
       }
     }
 
-    // Pointer-driven lights
     const p = getPointerState();
     const targetIntensity = p.lightIntensity;
     const liLerp = 0.1;
@@ -316,7 +393,6 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
     amb.color.lerp(targetColor, 0.15);
     dir.color.lerp(targetColor, 0.15);
 
-    // Scroll-driven model
     if (model) {
       const target = getScrollTarget();
       const smoothing = 0.12;
@@ -363,6 +439,7 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
   function onResize() {
     updateRendererSize();
   }
+
   window.addEventListener("resize", onResize);
 
   return {
@@ -370,6 +447,10 @@ export function createThreeScene({ mountEl, getScrollTarget, getPointerState, mo
     dispose() {
       cancelAnimationFrame(frameId);
       window.removeEventListener("resize", onResize);
+
+      renderer.domElement.removeEventListener("webglcontextlost", onContextLost);
+      renderer.domElement.removeEventListener("webglcontextrestored", onContextRestored);
+
       if (mountEl.contains(renderer.domElement)) mountEl.removeChild(renderer.domElement);
       renderer.dispose();
     }
