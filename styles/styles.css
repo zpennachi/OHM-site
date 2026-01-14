@@ -87,7 +87,7 @@ body {
   overflow: hidden;
   white-space: nowrap;
 
-  width: min(300px, 30vw);
+  width: min(200px);
 
   background: transparent;
   border: none;
