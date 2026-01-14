@@ -82,16 +82,13 @@ body {
   gap: 14px;
 }
 
-/* Marquee: clamp width + remove background/outline */
 .marquee-window {
   pointer-events: auto;
   overflow: hidden;
   white-space: nowrap;
 
-  /* clamp so it cuts off like a marquee */
-  width: min(560px, 62vw);
+  width: min(300px, 30vw);
 
-  /* remove the panel look */
   background: transparent;
   border: none;
   border-radius: 0;
@@ -133,8 +130,8 @@ body {
 }
 
 .top-logo {
-  width: 54px;
-  height: 54px;
+  width: 120px;
+  height: 120px;
   display: block;
   opacity: 0.9;
 }
