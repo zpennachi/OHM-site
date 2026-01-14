@@ -1,4 +1,3 @@
-
 import { setVhVar, isIOSUA, isMobileUA } from "./utils.js";
 import { createSections } from "./sections.js";
 import { mountFooterNav } from "./footerNav.js";
@@ -6,18 +5,23 @@ import { createThreeScene } from "./threeScene.js";
 
 const NAV_ITEMS = [
   { key: "mission", label: "Home", image: "1-min.jpg" },
+  { key: "video", label: "Video", image: "2-min.jpg" },
   { key: "contact", label: "Mission", image: "2-min.jpg" },
+  { key: "image", label: "Photo", image: "3-min.jpg" },
   { key: "donations", label: "Donate", image: "3-min.jpg" },
   { key: "shop", label: "Shop", image: "4-min.jpg" },
   { key: "events", label: "Contact", image: "5-min.jpg" },
 ];
 
+// 7 states to match 7 nav items (t maps smoothly across them)
 const MODEL_STATES = [
-  { zoom: 1.0, yShift: 0.0, rotX: 0.0, rotY: 0.0 },
-  { zoom: 4.0, yShift: 2.5, rotX: 0.0, rotY: 1.0 },
-  { zoom: 7.0, yShift: 2.0, rotX: 0.0, rotY: 0.0 },
-  { zoom: 5.2, yShift: 1.5, rotX: -1.15, rotY: -3.0 },
-  { zoom: 1.0, yShift: 0.0, rotX: 0.0, rotY: -3.0 },
+  { zoom: 1.0, yShift: 0.0, rotX: 0.0, rotY: 0.0 },    // Home
+  { zoom: 2.4, yShift: 1.2, rotX: 0.0, rotY: 0.7 },    // Video
+  { zoom: 4.0, yShift: 2.5, rotX: 0.0, rotY: 1.0 },    // Mission
+  { zoom: 6.0, yShift: 2.2, rotX: -0.4, rotY: 0.3 },   // Photo
+  { zoom: 7.0, yShift: 2.0, rotX: 0.0, rotY: 0.0 },    // Donate
+  { zoom: 5.2, yShift: 1.5, rotX: -1.15, rotY: -3.0 }, // Shop
+  { zoom: 1.0, yShift: 0.0, rotX: 0.0, rotY: -3.0 },   // Contact
 ];
 
 function createPointerLightControls() {
@@ -85,7 +89,7 @@ function createDebugOverlay() {
 
   function render() {
     if (!enabled) {
-      if (el && el.parentNode) el.parentNode.removeChild(el.parentNode);
+      if (el && el.parentNode) el.parentNode.removeChild(el);
       el = null;
       return;
     }
@@ -163,6 +167,32 @@ function setupButtons(handleNavClick) {
   }
 }
 
+// Guaranteed scrollTarget (independent of sections state)
+function makeScrollTargetGetter() {
+  const main = document.querySelector(".app-main");
+
+  const mainIsScrollable = () => {
+    if (!main) return false;
+    const cs = window.getComputedStyle(main);
+    const oy = cs.overflowY;
+    const canScroll = oy === "auto" || oy === "scroll" || oy === "overlay";
+    return canScroll && main.scrollHeight > main.clientHeight + 2;
+  };
+
+  return () => {
+    if (mainIsScrollable()) {
+      const st = main.scrollTop || 0;
+      const scrollable = Math.max(1, (main.scrollHeight || 1) - (main.clientHeight || 1));
+      return Math.max(0, Math.min(1, st / scrollable));
+    } else {
+      const st = window.scrollY || 0;
+      const doc = document.documentElement;
+      const scrollable = Math.max(1, (doc.scrollHeight || 1) - (window.innerHeight || 1));
+      return Math.max(0, Math.min(1, st / scrollable));
+    }
+  };
+}
+
 (function boot() {
   setVhVar();
 
@@ -170,13 +200,6 @@ function setupButtons(handleNavClick) {
   debug.set("ios", String(isIOSUA()));
   debug.set("mobile", String(isMobileUA()));
   debug.set("url", window.location.pathname);
-
-  // Add initial scroll/layout debug
-  const doc = document.documentElement;
-  debug.set("init.scrollY", String(window.scrollY || 0));
-  debug.set("init.h", `${doc.scrollHeight} / ${window.innerHeight}`);
-  debug.set("ovY(body)", getComputedStyle(document.body).overflowY);
-  debug.set("ovY(html)", getComputedStyle(document.documentElement).overflowY);
 
   const pointer = createPointerLightControls();
   const sections = createSections(NAV_ITEMS);
@@ -187,13 +210,11 @@ function setupButtons(handleNavClick) {
     return;
   }
 
+  const getScrollTarget = makeScrollTargetGetter();
+
   const three = createThreeScene({
     mountEl,
-getScrollTarget: () =>
-  typeof sections.getScrollTarget === "function"
-    ? sections.getScrollTarget()
-    : sections.state.scrollTarget,
-
+    getScrollTarget, // <- IMPORTANT: Three uses guaranteed scrollTarget now
     getPointerState: () => pointer.state,
     modelStates: MODEL_STATES,
     debugApi: debug,
@@ -214,7 +235,6 @@ getScrollTarget: () =>
     onItemClick: (key) => sections.handleNavClick(key),
   });
 
-  const hint = document.getElementById("hero-scroll-hint");
   let lastActive = sections.state.activeKey;
 
   function tick() {
@@ -223,20 +243,11 @@ getScrollTarget: () =>
       lastActive = active;
       three.startCrossfadeTo(getActiveItem().image);
     }
-    const doc = document.documentElement;
-    debug.set("y", String(window.scrollY || 0));
-    debug.set("h", `${doc.scrollHeight} / ${window.innerHeight}`);
-    debug.set("t", sections.state.scrollTarget.toFixed(3));
-    debug.set("hero", sections.state.heroProgress.toFixed(3));
-    debug.set("active", String(sections.state.activeKey));
-    debug.set("ovY(body)", getComputedStyle(document.body).overflowY);
-    debug.set("ovY(html)", getComputedStyle(document.documentElement).overflowY);
 
-    if (hint) {
-      const show = sections.state.heroProgress < 0.06;
-      hint.style.opacity = show ? "0.7" : "0";
-      hint.style.transform = show ? "translateY(0)" : "translateY(-6px)";
-      hint.style.transition = "opacity 240ms ease, transform 240ms ease";
+    // optional debug
+    if (debug.isEnabled()) {
+      debug.set("t", getScrollTarget().toFixed(3));
+      debug.set("active", String(active));
     }
 
     requestAnimationFrame(tick);
