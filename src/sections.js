@@ -89,56 +89,32 @@ export function createSections(navItems) {
   const sections = Array.from(root.querySelectorAll("section.section"));
   const navKeySet = new Set(navItems.map((i) => i.key));
 
-  const main = document.querySelector(".app-main");
+  let navKeyToIndex = new Map();
+  let sectionTops = [];
 
-  function mainIsScrollable() {
-    if (!main) return false;
-    const cs = window.getComputedStyle(main);
-    const oy = cs.overflowY;
-    const canScroll = oy === "auto" || oy === "scroll" || oy === "overlay";
-    return canScroll && main.scrollHeight > main.clientHeight + 2;
-  }
+  function recomputeLayoutMaps() {
+    // Window scroll only: positions are absolute in page space
+    sectionTops = sections.map((s) => {
+      const r = s.getBoundingClientRect();
+      return (window.scrollY || 0) + r.top;
+    });
 
-  function getScroller() {
-    return mainIsScrollable() ? main : null; // null => window scroll
-  }
-
-  // map nav key -> section element
-  let navKeyToSection = new Map();
-  function recomputeMaps() {
-    navKeyToSection = new Map();
-    for (const s of sections) {
-      const k = s.getAttribute("data-nav");
-      if (k && navKeySet.has(k) && !navKeyToSection.has(k)) {
-        navKeyToSection.set(k, s);
-      }
+    navKeyToIndex = new Map();
+    for (let i = 0; i < sections.length; i++) {
+      const k = sections[i].getAttribute("data-nav");
+      if (k && navKeySet.has(k) && !navKeyToIndex.has(k)) navKeyToIndex.set(k, i);
     }
   }
 
-  function getScrollTop(scroller) {
-    return scroller ? scroller.scrollTop || 0 : window.scrollY || 0;
-  }
-  function getViewportH(scroller) {
-    return scroller ? scroller.clientHeight || 1 : window.innerHeight || 1;
-  }
-  function getScrollable(scroller) {
-    if (scroller) {
-      return Math.max(1, (scroller.scrollHeight || 1) - (scroller.clientHeight || 1));
-    }
-    const doc = document.documentElement;
-    return Math.max(1, (doc.scrollHeight || 1) - (window.innerHeight || 1));
-  }
-
-  function deriveActiveNavKeyByCenter(scroller) {
-    const centerY = getViewportH(scroller) * 0.5;
-    const containerTop = scroller ? scroller.getBoundingClientRect().top : 0;
+  function deriveActiveNavKeyByCenter() {
+    const centerY = (window.innerHeight || 1) * 0.5;
 
     let bestIdx = 0;
     let bestDist = Infinity;
 
     for (let i = 0; i < sections.length; i++) {
       const r = sections[i].getBoundingClientRect();
-      const sectionCenter = (r.top - containerTop) + r.height * 0.5;
+      const sectionCenter = r.top + r.height * 0.5;
       const d = Math.abs(sectionCenter - centerY);
       if (d < bestDist) {
         bestDist = d;
@@ -157,86 +133,48 @@ export function createSections(navItems) {
     return navItems[0]?.key || "mission";
   }
 
-  function updateState() {
-    const scroller = getScroller();
-    const st = getScrollTop(scroller);
-    const scrollable = getScrollable(scroller);
-    const vh = getViewportH(scroller);
+  function handleScroll() {
+    const st = window.scrollY || 0;
+
+    const doc = document.documentElement;
+    const scrollable = Math.max(
+      1,
+      (doc.scrollHeight || 1) - (window.innerHeight || 1)
+    );
 
     state.scrollTarget = clamp01(st / scrollable);
+
+    const vh = window.innerHeight || 1;
     state.heroProgress = clamp01(st / Math.max(vh, 1));
 
-    const navKey = deriveActiveNavKeyByCenter(scroller);
+    const navKey = deriveActiveNavKeyByCenter();
     if (navKey !== state.activeKey) state.activeKey = navKey;
   }
 
-  // ✅ The important part: correct scroll-to math (no offsetTop)
-  function scrollToSection(sectionEl) {
-    if (!sectionEl) return;
-
-    const scroller = getScroller();
-    const headerOffset = 90; // adjust if you want
-
-    if (scroller) {
-      const scRect = scroller.getBoundingClientRect();
-      const elRect = sectionEl.getBoundingClientRect();
-
-      const y =
-        (elRect.top - scRect.top) +
-        (scroller.scrollTop || 0) -
-        headerOffset;
-
-      scroller.scrollTo({ top: Math.max(0, Math.round(y)), behavior: "smooth" });
-    } else {
-      const y =
-        (sectionEl.getBoundingClientRect().top + (window.scrollY || 0)) -
-        headerOffset;
-
-      window.scrollTo({ top: Math.max(0, Math.round(y)), behavior: "smooth" });
-      document.documentElement.scrollTop = y;
-      document.body.scrollTop = y;
-    }
-
-    // Fallback (rare, but helps in weird browsers)
-    setTimeout(() => {
-      try {
-        sectionEl.scrollIntoView({ behavior: "smooth", block: "start" });
-      } catch (_) {}
-    }, 0);
+  function scrollToY(y) {
+    window.scrollTo({ top: Math.max(0, Math.round(y)), behavior: "smooth" });
   }
 
   function handleNavClick(key) {
-    const section = navKeyToSection.get(key);
-    if (!section) return;
-    scrollToSection(section);
+    if (!navKeyToIndex.has(key)) return;
+    const idx = navKeyToIndex.get(key);
+    const y = sectionTops[idx] ?? 0;
+    scrollToY(y - 90); // header offset
     state.activeKey = key;
   }
 
-  recomputeMaps();
-  updateState();
-
-  // Keep it minimal: use actual scroll events on the right scroller (not rAF polling)
-  function attach() {
-    const scroller = getScroller();
-    if (scroller) scroller.addEventListener("scroll", updateState, { passive: true });
-    else window.addEventListener("scroll", updateState, { passive: true });
-  }
-  function detach() {
-    const scroller = getScroller();
-    if (scroller) scroller.removeEventListener("scroll", updateState);
-    else window.removeEventListener("scroll", updateState);
-  }
-
-  attach();
-
   const onResize = () => {
-    detach();
-    recomputeMaps();
-    updateState();
-    attach(); // reattach in case scroller changed
+    recomputeLayoutMaps();
+    handleScroll();
   };
 
+  recomputeLayoutMaps();
+  handleScroll();
+
+  window.addEventListener("scroll", handleScroll, { passive: true });
   window.addEventListener("resize", onResize);
+
+  // layout shifts (fonts/video)
   setTimeout(onResize, 0);
   setTimeout(onResize, 250);
   setTimeout(onResize, 1000);
@@ -244,9 +182,8 @@ export function createSections(navItems) {
   return {
     state,
     handleNavClick,
-    getScrollTarget: () => state.scrollTarget,
     dispose() {
-      detach();
+      window.removeEventListener("scroll", handleScroll);
       window.removeEventListener("resize", onResize);
     },
   };
