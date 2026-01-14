@@ -13,15 +13,12 @@ const NAV_ITEMS = [
   { key: "events", label: "Contact", image: "5-min.jpg" },
 ];
 
-// 7 states to match 7 nav items (t maps smoothly across them)
 const MODEL_STATES = [
-  { zoom: 1.0, yShift: 0.0, rotX: 0.0, rotY: 0.0 },    // Home
-  { zoom: 2.4, yShift: 1.2, rotX: 0.0, rotY: 0.7 },    // Video
-  { zoom: 4.0, yShift: 2.5, rotX: 0.0, rotY: 1.0 },    // Mission
-  { zoom: 6.0, yShift: 2.2, rotX: -0.4, rotY: 0.3 },   // Photo
-  { zoom: 7.0, yShift: 2.0, rotX: 0.0, rotY: 0.0 },    // Donate
-  { zoom: 5.2, yShift: 1.5, rotX: -1.15, rotY: -3.0 }, // Shop
-  { zoom: 1.0, yShift: 0.0, rotX: 0.0, rotY: -3.0 },   // Contact
+  { zoom: 1.0, yShift: 0.0, rotX: 0.0, rotY: 0.0 },
+  { zoom: 4.0, yShift: 2.5, rotX: 0.0, rotY: 1.0 },
+  { zoom: 7.0, yShift: 2.0, rotX: 0.0, rotY: 0.0 },
+  { zoom: 5.2, yShift: 1.5, rotX: -1.15, rotY: -3.0 },
+  { zoom: 1.0, yShift: 0.0, rotX: 0.0, rotY: -3.0 },
 ];
 
 function createPointerLightControls() {
@@ -105,9 +102,9 @@ function createDebugOverlay() {
       if (errs.length > 6) lines.push(`- (+${errs.length - 6} more)`);
     }
 
-    node.innerHTML = `<div class="debug-title">debug (press D to toggle)</div><pre style="margin:8px 0 0 0;white-space:pre-wrap;">${lines.join(
+    node.innerHTML = `<div class="debug-title">debug (press D to toggle)</div>${lines.join(
       "\n"
-    )}</pre>`;
+    )}`;
   }
 
   function set(key, value) {
@@ -167,30 +164,13 @@ function setupButtons(handleNavClick) {
   }
 }
 
-// Guaranteed scrollTarget (independent of sections state)
-function makeScrollTargetGetter() {
-  const main = document.querySelector(".app-main");
-
-  const mainIsScrollable = () => {
-    if (!main) return false;
-    const cs = window.getComputedStyle(main);
-    const oy = cs.overflowY;
-    const canScroll = oy === "auto" || oy === "scroll" || oy === "overlay";
-    return canScroll && main.scrollHeight > main.clientHeight + 2;
-  };
-
-  return () => {
-    if (mainIsScrollable()) {
-      const st = main.scrollTop || 0;
-      const scrollable = Math.max(1, (main.scrollHeight || 1) - (main.clientHeight || 1));
-      return Math.max(0, Math.min(1, st / scrollable));
-    } else {
-      const st = window.scrollY || 0;
-      const doc = document.documentElement;
-      const scrollable = Math.max(1, (doc.scrollHeight || 1) - (window.innerHeight || 1));
-      return Math.max(0, Math.min(1, st / scrollable));
-    }
-  };
+// ✅ Single source of truth for Three animation progress (0..1)
+function getWindowScroll01() {
+  const doc = document.documentElement;
+  const st = window.scrollY || 0;
+  const scrollable = Math.max(1, (doc.scrollHeight || 1) - (window.innerHeight || 1));
+  const t = st / scrollable;
+  return Math.max(0, Math.min(1, t));
 }
 
 (function boot() {
@@ -210,11 +190,10 @@ function makeScrollTargetGetter() {
     return;
   }
 
-  const getScrollTarget = makeScrollTargetGetter();
-
   const three = createThreeScene({
     mountEl,
-    getScrollTarget, // <- IMPORTANT: Three uses guaranteed scrollTarget now
+    // ✅ drive Three from window scroll (reliable)
+    getScrollTarget: () => getWindowScroll01(),
     getPointerState: () => pointer.state,
     modelStates: MODEL_STATES,
     debugApi: debug,
@@ -235,19 +214,24 @@ function makeScrollTargetGetter() {
     onItemClick: (key) => sections.handleNavClick(key),
   });
 
+  const hint = document.getElementById("hero-scroll-hint");
   let lastActive = sections.state.activeKey;
 
   function tick() {
+    // ✅ Debug: prove scroll target is moving
+    debug.set("st", getWindowScroll01().toFixed(3));
+
     const active = sections.state.activeKey;
     if (active !== lastActive) {
       lastActive = active;
       three.startCrossfadeTo(getActiveItem().image);
     }
 
-    // optional debug
-    if (debug.isEnabled()) {
-      debug.set("t", getScrollTarget().toFixed(3));
-      debug.set("active", String(active));
+    if (hint) {
+      const show = sections.state.heroProgress < 0.06;
+      hint.style.opacity = show ? "0.7" : "0";
+      hint.style.transform = show ? "translateY(0)" : "translateY(-6px)";
+      hint.style.transition = "opacity 240ms ease, transform 240ms ease";
     }
 
     requestAnimationFrame(tick);
