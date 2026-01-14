@@ -22,7 +22,6 @@ export function createSections(navItems) {
           <button id="hero-enter" class="hero-enter" type="button">Enter</button>
         </div>
       </div>
-      <div id="hero-scroll-hint" class="hero-scroll-hint">Scroll</div>
     </section>
 
     <section id="section-video" class="section section-video">
