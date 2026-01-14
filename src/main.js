@@ -5,14 +5,13 @@ import { createThreeScene } from "./threeScene.js";
 
 const NAV_ITEMS = [
   { key: "mission", label: "Home", image: "1-min.jpg" },
-  { key: "video", label: "Video", image: "2-min.jpg" },
   { key: "contact", label: "Mission", image: "2-min.jpg" },
-  { key: "image", label: "Photo", image: "3-min.jpg" },
   { key: "donations", label: "Donate", image: "3-min.jpg" },
   { key: "shop", label: "Shop", image: "4-min.jpg" },
   { key: "events", label: "Contact", image: "5-min.jpg" },
 ];
 
+// Your model interpolation states (unchanged)
 const MODEL_STATES = [
   { zoom: 1.0, yShift: 0.0, rotX: 0.0, rotY: 0.0 },
   { zoom: 4.0, yShift: 2.5, rotX: 0.0, rotY: 1.0 },
@@ -68,73 +67,25 @@ function createPointerLightControls() {
   };
 }
 
-function createDebugOverlay() {
-  const params = new URLSearchParams(window.location.search);
-  let enabled = params.get("debug") === "1";
-
-  const kv = new Map();
-  const errs = [];
-  let el = null;
-
-  function ensureEl() {
-    if (el) return el;
-    el = document.createElement("div");
-    el.className = "debug-overlay";
-    document.body.appendChild(el);
-    return el;
+/**
+ * ✅ SINGLE SOURCE OF TRUTH FOR SCROLL PROGRESS (0..1)
+ * Your site is scrolling inside `.app-main`, not window.
+ * This returns a normalized 0..1 value and logs it.
+ */
+function getScroll01() {
+  const main = document.querySelector(".app-main");
+  if (!main) {
+    console.log("scroll01: 0.000 (no .app-main found)");
+    return 0;
   }
 
-  function render() {
-    if (!enabled) {
-      if (el && el.parentNode) el.parentNode.removeChild(el);
-      el = null;
-      return;
-    }
+  const st = main.scrollTop || 0;
+  const max = Math.max(1, (main.scrollHeight || 1) - (main.clientHeight || 1));
+  const v = st / max;
 
-    const node = ensureEl();
-    const lines = [];
-    lines.push("DEBUG");
-    for (const [k, v] of kv.entries()) lines.push(`${k}: ${v}`);
-    if (errs.length) {
-      lines.push("");
-      lines.push("errors:");
-      for (let i = 0; i < Math.min(errs.length, 6); i++) lines.push(`- ${errs[i]}`);
-      if (errs.length > 6) lines.push(`- (+${errs.length - 6} more)`);
-    }
+  console.log("scroll01:", v.toFixed(3));
 
-    node.innerHTML = `<div class="debug-title">debug (press D to toggle)</div>${lines.join(
-      "\n"
-    )}`;
-  }
-
-  function set(key, value) {
-    kv.set(key, value);
-    render();
-  }
-
-  function pushErr(msg) {
-    errs.unshift(msg);
-    if (errs.length > 30) errs.pop();
-    render();
-  }
-
-  function toggle() {
-    enabled = !enabled;
-    render();
-  }
-
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "d" || e.key === "D") toggle();
-  });
-
-  render();
-
-  return {
-    set,
-    pushErr,
-    toggle,
-    isEnabled: () => enabled,
-  };
+  return Math.max(0, Math.min(1, v));
 }
 
 function setupButtons(handleNavClick) {
@@ -164,57 +115,30 @@ function setupButtons(handleNavClick) {
   }
 }
 
-/**
- * ✅ The key fix:
- * Read scroll progress from the ACTUAL scroll container.
- * - If .app-main is scrollable, use its scrollTop.
- * - Otherwise use window.scrollY.
- */
-function getScroll01() {
-  const main = document.querySelector(".app-main");
-
-  if (main && main.scrollHeight > main.clientHeight + 2) {
-    const st = main.scrollTop || 0;
-    const scrollable = Math.max(
-      1,
-      (main.scrollHeight || 1) - (main.clientHeight || 1)
-    );
-    return Math.max(0, Math.min(1, st / scrollable));
-  }
-
-  const doc = document.documentElement;
-  const st = window.scrollY || 0;
-  const scrollable = Math.max(
-    1,
-    (doc.scrollHeight || 1) - (window.innerHeight || 1)
-  );
-  return Math.max(0, Math.min(1, st / scrollable));
-}
-
 (function boot() {
   setVhVar();
 
-  const debug = createDebugOverlay();
-  debug.set("ios", String(isIOSUA()));
-  debug.set("mobile", String(isMobileUA()));
-  debug.set("url", window.location.pathname);
+  // Keep your old debug overlay code out of the way — console only now
+  console.log("ios:", String(isIOSUA()));
+  console.log("mobile:", String(isMobileUA()));
+  console.log("url:", window.location.pathname);
 
   const pointer = createPointerLightControls();
   const sections = createSections(NAV_ITEMS);
 
   const mountEl = document.getElementById("three-root");
   if (!mountEl) {
-    debug.pushErr("Missing #three-root");
+    console.error("Missing #three-root");
     return;
   }
 
   const three = createThreeScene({
     mountEl,
-    // ✅ drive Three from actual scroll container
+    // ✅ Critical fix: Three reads the actual scrolling container
     getScrollTarget: () => getScroll01(),
     getPointerState: () => pointer.state,
     modelStates: MODEL_STATES,
-    debugApi: debug,
+    debugApi: null,
   });
 
   setupButtons(sections.handleNavClick);
@@ -222,6 +146,7 @@ function getScroll01() {
   const getActiveItem = () =>
     NAV_ITEMS.find((i) => i.key === sections.state.activeKey) || NAV_ITEMS[0];
 
+  // initial background
   three.startCrossfadeTo(getActiveItem().image);
 
   mountFooterNav({
@@ -232,24 +157,14 @@ function getScroll01() {
     onItemClick: (key) => sections.handleNavClick(key),
   });
 
-  const hint = document.getElementById("hero-scroll-hint");
+  // Keep your bg updates on section changes
   let lastActive = sections.state.activeKey;
 
   function tick() {
-    // ✅ show scroll target in overlay
-    debug.set("st", getScroll01().toFixed(3));
-
     const active = sections.state.activeKey;
     if (active !== lastActive) {
       lastActive = active;
       three.startCrossfadeTo(getActiveItem().image);
-    }
-
-    if (hint) {
-      const show = sections.state.heroProgress < 0.06;
-      hint.style.opacity = show ? "0.7" : "0";
-      hint.style.transform = show ? "translateY(0)" : "translateY(-6px)";
-      hint.style.transition = "opacity 240ms ease, transform 240ms ease";
     }
 
     requestAnimationFrame(tick);
