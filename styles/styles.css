@@ -42,6 +42,9 @@ body {
   font-family: "AktivGrotesk", system-ui, -apple-system, Segoe UI, Roboto, Arial,
     sans-serif;
   overflow-x: hidden;
+
+  /* SINGLE SCROLL SOURCE: window */
+  overflow-y: auto;
 }
 
 .app-root {
@@ -144,6 +147,12 @@ body {
 .app-main {
   position: relative;
   z-index: 5;
+
+  /* SINGLE SCROLL SOURCE: window
+     Never allow nested scrolling here. */
+  overflow: visible !important;
+  height: auto !important;
+  max-height: none !important;
 }
 
 .main-inner {
@@ -328,8 +337,6 @@ body {
   }
 }
 
-
-
 .footer-nav {
   position: fixed;
   left: 0;
@@ -371,4 +378,3 @@ body {
   border-color: rgba(255, 255, 255, 0.22);
   color: rgba(255, 255, 255, 0.92);
 }
-
