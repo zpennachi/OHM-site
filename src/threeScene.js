@@ -408,6 +408,9 @@ const swirlVideoMat = new THREE.ShaderMaterial({
     amb.color.lerp(targetColor, 0.15);
     dir.color.lerp(targetColor, 0.15);
 
+    log("st", (typeof getScrollTarget === "function" ? getScrollTarget() : 0).toFixed(3));
+log("model", model ? "1" : "0");
+    
     if (model) {
       const target = typeof getScrollTarget === "function" ? getScrollTarget() : 0;
       const smoothing = 0.12;
