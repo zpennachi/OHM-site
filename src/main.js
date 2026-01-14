@@ -189,7 +189,11 @@ function setupButtons(handleNavClick) {
 
   const three = createThreeScene({
     mountEl,
-    getScrollTarget: () => sections.state.scrollTarget,
+getScrollTarget: () =>
+  typeof sections.getScrollTarget === "function"
+    ? sections.getScrollTarget()
+    : sections.state.scrollTarget,
+
     getPointerState: () => pointer.state,
     modelStates: MODEL_STATES,
     debugApi: debug,
