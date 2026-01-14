@@ -1,3 +1,4 @@
+
 import { setVhVar, isIOSUA, isMobileUA } from "./utils.js";
 import { createSections } from "./sections.js";
 import { mountFooterNav } from "./footerNav.js";
@@ -8,7 +9,7 @@ const NAV_ITEMS = [
   { key: "contact", label: "Mission", image: "2-min.jpg" },
   { key: "donations", label: "Donate", image: "3-min.jpg" },
   { key: "shop", label: "Shop", image: "4-min.jpg" },
-  { key: "events", label: "Contact", image: "5-min.jpg" }
+  { key: "events", label: "Contact", image: "5-min.jpg" },
 ];
 
 const MODEL_STATES = [
@@ -16,14 +17,14 @@ const MODEL_STATES = [
   { zoom: 4.0, yShift: 2.5, rotX: 0.0, rotY: 1.0 },
   { zoom: 7.0, yShift: 2.0, rotX: 0.0, rotY: 0.0 },
   { zoom: 5.2, yShift: 1.5, rotX: -1.15, rotY: -3.0 },
-  { zoom: 1.0, yShift: 0.0, rotX: 0.0, rotY: -3.0 }
+  { zoom: 1.0, yShift: 0.0, rotX: 0.0, rotY: -3.0 },
 ];
 
 function createPointerLightControls() {
   const state = {
     targetRotation: { x: 0, y: 0 },
     lightIntensity: 0.7,
-    lightSpeed: 0
+    lightSpeed: 0,
   };
 
   let lastX = window.innerWidth / 2;
@@ -62,7 +63,7 @@ function createPointerLightControls() {
     state,
     dispose() {
       window.removeEventListener("pointermove", onMove);
-    }
+    },
   };
 }
 
@@ -84,7 +85,7 @@ function createDebugOverlay() {
 
   function render() {
     if (!enabled) {
-      if (el && el.parentNode) el.parentNode.removeChild(el);
+      if (el && el.parentNode) el.parentNode.removeChild(el.parentNode);
       el = null;
       return;
     }
@@ -100,9 +101,9 @@ function createDebugOverlay() {
       if (errs.length > 6) lines.push(`- (+${errs.length - 6} more)`);
     }
 
-    node.innerHTML = `<div class="debug-title">debug (press D to toggle)</div>${lines.join(
+    node.innerHTML = `<div class="debug-title">debug (press D to toggle)</div><pre style="margin:8px 0 0 0;white-space:pre-wrap;">${lines.join(
       "\n"
-    )}`;
+    )}</pre>`;
   }
 
   function set(key, value) {
@@ -131,7 +132,7 @@ function createDebugOverlay() {
     set,
     pushErr,
     toggle,
-    isEnabled: () => enabled
+    isEnabled: () => enabled,
   };
 }
 
@@ -170,6 +171,13 @@ function setupButtons(handleNavClick) {
   debug.set("mobile", String(isMobileUA()));
   debug.set("url", window.location.pathname);
 
+  // Add initial scroll/layout debug
+  const doc = document.documentElement;
+  debug.set("init.scrollY", String(window.scrollY || 0));
+  debug.set("init.h", `${doc.scrollHeight} / ${window.innerHeight}`);
+  debug.set("ovY(body)", getComputedStyle(document.body).overflowY);
+  debug.set("ovY(html)", getComputedStyle(document.documentElement).overflowY);
+
   const pointer = createPointerLightControls();
   const sections = createSections(NAV_ITEMS);
 
@@ -184,7 +192,7 @@ function setupButtons(handleNavClick) {
     getScrollTarget: () => sections.state.scrollTarget,
     getPointerState: () => pointer.state,
     modelStates: MODEL_STATES,
-    debugApi: debug
+    debugApi: debug,
   });
 
   setupButtons(sections.handleNavClick);
@@ -199,7 +207,7 @@ function setupButtons(handleNavClick) {
     getActiveKey: () => sections.state.activeKey,
     onItemHover: (item) => three.startCrossfadeTo(item.image),
     onItemLeave: () => three.startCrossfadeTo(getActiveItem().image),
-    onItemClick: (key) => sections.handleNavClick(key)
+    onItemClick: (key) => sections.handleNavClick(key),
   });
 
   const hint = document.getElementById("hero-scroll-hint");
@@ -211,6 +219,14 @@ function setupButtons(handleNavClick) {
       lastActive = active;
       three.startCrossfadeTo(getActiveItem().image);
     }
+    const doc = document.documentElement;
+    debug.set("y", String(window.scrollY || 0));
+    debug.set("h", `${doc.scrollHeight} / ${window.innerHeight}`);
+    debug.set("t", sections.state.scrollTarget.toFixed(3));
+    debug.set("hero", sections.state.heroProgress.toFixed(3));
+    debug.set("active", String(sections.state.activeKey));
+    debug.set("ovY(body)", getComputedStyle(document.body).overflowY);
+    debug.set("ovY(html)", getComputedStyle(document.documentElement).overflowY);
 
     if (hint) {
       const show = sections.state.heroProgress < 0.06;
