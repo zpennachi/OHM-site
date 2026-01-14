@@ -52,8 +52,7 @@ function createPointerLightControls() {
     const vNorm = Math.min(speed / 1000, 1);
     const minIntensity = 0.4;
     const maxIntensityVal = 2.5;
-    state.lightIntensity =
-      minIntensity + (maxIntensityVal - minIntensity) * vNorm;
+    state.lightIntensity = minIntensity + (maxIntensityVal - minIntensity) * vNorm;
     state.lightSpeed = vNorm;
   }
 
@@ -68,12 +67,25 @@ function createPointerLightControls() {
 }
 
 /**
- * ✅ Robust scroll progress: auto-detect the actual scrolling container.
- * Logs to console which scroller is used and the live scroll01 value.
+ * ✅ Detect the REAL scrolling container by watching which element's scrollTop changes.
+ * This works even when scroll events don't bubble.
  */
-const getScroll01 = (() => {
-  let scroller = null; // HTMLElement or "window"
-  let didLogChoice = false;
+function createScrollDetector() {
+  let active = null; // "window" or HTMLElement
+  let candidates = [];
+  let lastMap = new Map();
+  let logCounter = 0;
+
+  function labelFor(el) {
+    if (el === "window") return "window";
+    const tag = el.tagName ? el.tagName.toLowerCase() : "unknown";
+    const id = el.id ? `#${el.id}` : "";
+    const cls =
+      el.className && typeof el.className === "string"
+        ? `.${el.className.trim().replace(/\s+/g, ".")}`
+        : "";
+    return `${tag}${id}${cls}`;
+  }
 
   function isScrollableEl(el) {
     if (!el || el === document.body || el === document.documentElement) return false;
@@ -83,54 +95,90 @@ const getScroll01 = (() => {
     return canScroll && el.scrollHeight > el.clientHeight + 2;
   }
 
-  function findScroller() {
-    // Prefer a real scrollable ancestor of sections-root if it exists.
-    const anchor = document.getElementById("sections-root");
-    let el = anchor;
-
-    while (el && el !== document.body && el !== document.documentElement) {
-      if (isScrollableEl(el)) return el;
-      el = el.parentElement;
+  function readScrollTop(el) {
+    if (el === "window") {
+      const se = document.scrollingElement || document.documentElement;
+      return window.scrollY || se.scrollTop || 0;
     }
-
-    // Otherwise use window.
-    return "window";
+    return el.scrollTop || 0;
   }
 
-  function read01(from) {
-    if (from === "window") {
+  function readScroll01(el) {
+    if (el === "window") {
       const se = document.scrollingElement || document.documentElement;
       const st = window.scrollY || se.scrollTop || 0;
       const max = Math.max(1, (se.scrollHeight || 1) - (window.innerHeight || 1));
       return Math.max(0, Math.min(1, st / max));
-    } else {
-      const st = from.scrollTop || 0;
-      const max = Math.max(1, (from.scrollHeight || 1) - (from.clientHeight || 1));
-      return Math.max(0, Math.min(1, st / max));
     }
+    const st = el.scrollTop || 0;
+    const max = Math.max(1, (el.scrollHeight || 1) - (el.clientHeight || 1));
+    return Math.max(0, Math.min(1, st / max));
   }
 
-  return function getScroll01() {
-    if (!scroller) {
-      scroller = findScroller();
-      if (!didLogChoice) {
-        didLogChoice = true;
-        console.log(
-          "[scroll] scroller picked:",
-          scroller === "window"
-            ? "window"
-            : `${scroller.tagName.toLowerCase()}#${scroller.id || ""}.${(scroller.className || "")
-                .toString()
-                .replace(/\s+/g, ".")}`
-        );
-      }
+  function collectCandidates() {
+    // include window always
+    const list = ["window"];
+
+    // include any scrollable elements in the DOM
+    const all = Array.from(document.querySelectorAll("*"));
+    for (const el of all) {
+      if (isScrollableEl(el)) list.push(el);
     }
 
-    const v = read01(scroller);
-    console.log("scroll01:", v.toFixed(3));
-    return v;
+    // also include .app-main even if styles lie (some setups still scroll)
+    const main = document.querySelector(".app-main");
+    if (main && !list.includes(main)) list.push(main);
+
+    candidates = list;
+
+    // init lastMap
+    lastMap = new Map();
+    for (const c of candidates) lastMap.set(c, readScrollTop(c));
+
+    console.log(
+      "[scroll-detector] candidates:",
+      candidates.map(labelFor)
+    );
+  }
+
+  function tick() {
+    if (!candidates.length) collectCandidates();
+
+    // detect changes
+    for (const c of candidates) {
+      const prev = lastMap.get(c) || 0;
+      const cur = readScrollTop(c);
+      if (cur !== prev) {
+        active = c;
+        if (logCounter < 6) {
+          console.log("[scroll-detector] ACTIVE =", labelFor(active));
+          logCounter++;
+        }
+      }
+      lastMap.set(c, cur);
+    }
+
+    requestAnimationFrame(tick);
+  }
+
+  requestAnimationFrame(tick);
+
+  return {
+    get01() {
+      // If we haven't detected yet, still return best guess from window
+      const use = active || "window";
+      const v = readScroll01(use);
+
+      // Log occasionally so you can see it move without spamming too hard
+      // (still frequent enough to verify it's working)
+      if (logCounter < 50) {
+        console.log("scroll01:", v.toFixed(3), "via", labelFor(use));
+        logCounter++;
+      }
+      return v;
+    },
   };
-})();
+}
 
 function setupButtons(handleNavClick) {
   const heroEnter = document.getElementById("hero-enter");
@@ -175,10 +223,13 @@ function setupButtons(handleNavClick) {
     return;
   }
 
+  // ✅ New: real scroller detector
+  const scroller = createScrollDetector();
+
   const three = createThreeScene({
     mountEl,
-    // ✅ Critical: Three reads actual scroll progress
-    getScrollTarget: () => getScroll01(),
+    // ✅ This is now guaranteed to reflect the real scroll container
+    getScrollTarget: () => scroller.get01(),
     getPointerState: () => pointer.state,
     modelStates: MODEL_STATES,
     debugApi: null,
@@ -189,6 +240,7 @@ function setupButtons(handleNavClick) {
   const getActiveItem = () =>
     NAV_ITEMS.find((i) => i.key === sections.state.activeKey) || NAV_ITEMS[0];
 
+  // initial background
   three.startCrossfadeTo(getActiveItem().image);
 
   mountFooterNav({
