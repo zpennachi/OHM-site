@@ -164,13 +164,31 @@ function setupButtons(handleNavClick) {
   }
 }
 
-// ✅ Single source of truth for Three animation progress (0..1)
-function getWindowScroll01() {
+/**
+ * ✅ The key fix:
+ * Read scroll progress from the ACTUAL scroll container.
+ * - If .app-main is scrollable, use its scrollTop.
+ * - Otherwise use window.scrollY.
+ */
+function getScroll01() {
+  const main = document.querySelector(".app-main");
+
+  if (main && main.scrollHeight > main.clientHeight + 2) {
+    const st = main.scrollTop || 0;
+    const scrollable = Math.max(
+      1,
+      (main.scrollHeight || 1) - (main.clientHeight || 1)
+    );
+    return Math.max(0, Math.min(1, st / scrollable));
+  }
+
   const doc = document.documentElement;
   const st = window.scrollY || 0;
-  const scrollable = Math.max(1, (doc.scrollHeight || 1) - (window.innerHeight || 1));
-  const t = st / scrollable;
-  return Math.max(0, Math.min(1, t));
+  const scrollable = Math.max(
+    1,
+    (doc.scrollHeight || 1) - (window.innerHeight || 1)
+  );
+  return Math.max(0, Math.min(1, st / scrollable));
 }
 
 (function boot() {
@@ -192,8 +210,8 @@ function getWindowScroll01() {
 
   const three = createThreeScene({
     mountEl,
-    // ✅ drive Three from window scroll (reliable)
-    getScrollTarget: () => getWindowScroll01(),
+    // ✅ drive Three from actual scroll container
+    getScrollTarget: () => getScroll01(),
     getPointerState: () => pointer.state,
     modelStates: MODEL_STATES,
     debugApi: debug,
@@ -218,8 +236,8 @@ function getWindowScroll01() {
   let lastActive = sections.state.activeKey;
 
   function tick() {
-    // ✅ Debug: prove scroll target is moving
-    debug.set("st", getWindowScroll01().toFixed(3));
+    // ✅ show scroll target in overlay
+    debug.set("st", getScroll01().toFixed(3));
 
     const active = sections.state.activeKey;
     if (active !== lastActive) {
