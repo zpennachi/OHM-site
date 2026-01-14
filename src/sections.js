@@ -10,6 +10,7 @@ export function createSections(navItems) {
   const root = document.getElementById("sections-root");
   if (!root) throw new Error("Missing #sections-root");
 
+  // Keep your same markup (with data-nav on sections you want tracked)
   root.innerHTML = `
     <section id="section-mission" class="section section-hero" data-nav="mission">
       <div class="hero-inner">
@@ -86,105 +87,85 @@ export function createSections(navItems) {
     </section>
   `;
 
-  const sections = Array.from(root.querySelectorAll("section.section"));
   const navKeySet = new Set(navItems.map((i) => i.key));
+  const allSections = Array.from(root.querySelectorAll("section.section"));
 
-  let navKeyToIndex = new Map();
-  let sectionTops = [];
+  // Only sections that are part of nav keys participate in activeKey
+  const tracked = allSections.filter((s) => {
+    const k = s.getAttribute("data-nav");
+    return k && navKeySet.has(k);
+  });
 
-  function recomputeLayoutMaps() {
-    // Window scroll only: positions are absolute in page space
-    sectionTops = sections.map((s) => {
-      const r = s.getBoundingClientRect();
-      return (window.scrollY || 0) + r.top;
-    });
-
-    navKeyToIndex = new Map();
-    for (let i = 0; i < sections.length; i++) {
-      const k = sections[i].getAttribute("data-nav");
-      if (k && navKeySet.has(k) && !navKeyToIndex.has(k)) navKeyToIndex.set(k, i);
-    }
+  const navKeyToSection = new Map();
+  for (const s of tracked) {
+    const k = s.getAttribute("data-nav");
+    if (k && !navKeyToSection.has(k)) navKeyToSection.set(k, s);
   }
 
-  function deriveActiveNavKeyByCenter() {
-    const centerY = (window.innerHeight || 1) * 0.5;
-
-    let bestIdx = 0;
-    let bestDist = Infinity;
-
-    for (let i = 0; i < sections.length; i++) {
-      const r = sections[i].getBoundingClientRect();
-      const sectionCenter = r.top + r.height * 0.5;
-      const d = Math.abs(sectionCenter - centerY);
-      if (d < bestDist) {
-        bestDist = d;
-        bestIdx = i;
-      }
-    }
-
-    const direct = sections[bestIdx]?.getAttribute("data-nav");
-    if (direct && navKeySet.has(direct)) return direct;
-
-    for (let i = bestIdx; i >= 0; i--) {
-      const k = sections[i].getAttribute("data-nav");
-      if (k && navKeySet.has(k)) return k;
-    }
-
-    return navItems[0]?.key || "mission";
-  }
-
+  // --- Window scroll only: drive scrollTarget + heroProgress ---
   function handleScroll() {
     const st = window.scrollY || 0;
-
     const doc = document.documentElement;
-    const scrollable = Math.max(
-      1,
-      (doc.scrollHeight || 1) - (window.innerHeight || 1)
-    );
-
+    const scrollable = Math.max(1, (doc.scrollHeight || 1) - (window.innerHeight || 1));
     state.scrollTarget = clamp01(st / scrollable);
 
     const vh = window.innerHeight || 1;
     state.heroProgress = clamp01(st / Math.max(vh, 1));
-
-    const navKey = deriveActiveNavKeyByCenter();
-    if (navKey !== state.activeKey) state.activeKey = navKey;
   }
-
-  function scrollToY(y) {
-    window.scrollTo({ top: Math.max(0, Math.round(y)), behavior: "smooth" });
-  }
-
-  function handleNavClick(key) {
-    if (!navKeyToIndex.has(key)) return;
-    const idx = navKeyToIndex.get(key);
-    const y = sectionTops[idx] ?? 0;
-    scrollToY(y - 90); // header offset
-    state.activeKey = key;
-  }
-
-  const onResize = () => {
-    recomputeLayoutMaps();
-    handleScroll();
-  };
-
-  recomputeLayoutMaps();
-  handleScroll();
 
   window.addEventListener("scroll", handleScroll, { passive: true });
-  window.addEventListener("resize", onResize);
+  handleScroll();
 
-  // layout shifts (fonts/video)
-  setTimeout(onResize, 0);
-  setTimeout(onResize, 250);
-  setTimeout(onResize, 1000);
+  // --- Active section tracking via IntersectionObserver ---
+  // Choose the section most centered in the viewport:
+  // rootMargin shrinks observer box so "center-ish" wins.
+  const io = new IntersectionObserver(
+    (entries) => {
+      // Pick highest intersectionRatio among currently intersecting entries
+      let best = null;
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        if (!best || e.intersectionRatio > best.intersectionRatio) best = e;
+      }
+      if (!best) return;
+
+      const key = best.target.getAttribute("data-nav");
+      if (key && navKeySet.has(key) && key !== state.activeKey) {
+        state.activeKey = key;
+      }
+    },
+    {
+      root: null,
+      threshold: [0.15, 0.25, 0.35, 0.5, 0.65],
+      rootMargin: "-35% 0px -35% 0px",
+    }
+  );
+
+  for (const s of tracked) io.observe(s);
+
+  // --- Click-to-scroll: no math, no bugs ---
+  function handleNavClick(key) {
+    const section = navKeyToSection.get(key);
+    if (!section) return;
+
+    // Minimal offset for your fixed header shell
+    // We'll scroll into view then nudge slightly.
+    section.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    // Nudge to account for header
+    setTimeout(() => {
+      window.scrollBy({ top: -90, left: 0, behavior: "instant" });
+    }, 250);
+
+    state.activeKey = key;
+  }
 
   return {
     state,
     handleNavClick,
     dispose() {
       window.removeEventListener("scroll", handleScroll);
-      window.removeEventListener("resize", onResize);
+      io.disconnect();
     },
   };
 }
