@@ -88,39 +88,83 @@ export function createSections(navItems) {
 
   const sections = Array.from(root.querySelectorAll("section.section"));
   const navKeySet = new Set(navItems.map((i) => i.key));
+  const main = document.querySelector(".app-main");
 
   let navKeyToSection = new Map();
-
-  function recomputeLayoutMaps() {
+  function recomputeMaps() {
     navKeyToSection = new Map();
     for (const s of sections) {
       const k = s.getAttribute("data-nav");
-      if (k && navKeySet.has(k) && !navKeyToSection.has(k)) navKeyToSection.set(k, s);
+      if (k && navKeySet.has(k) && !navKeyToSection.has(k)) {
+        navKeyToSection.set(k, s);
+      }
     }
   }
 
-  function deriveActiveNavKeyByCenter() {
-    const centerY = (window.innerHeight || 1) * 0.5;
+  function mainIsScrollable() {
+    if (!main) return false;
+    const cs = window.getComputedStyle(main);
+    const oy = cs.overflowY;
+    const canScroll =
+      oy === "auto" || oy === "scroll" || oy === "overlay";
+    return canScroll && main.scrollHeight > main.clientHeight + 2;
+  }
 
-    let best = sections[0];
+  // Decide which scroller is currently active, based on which one can scroll and/or has a scrollTop
+  function getScroller() {
+    const mainOk = mainIsScrollable();
+    const mainTop = mainOk ? (main.scrollTop || 0) : 0;
+    const winTop = window.scrollY || 0;
+
+    // If main is scrollable and is being used (or window isn't moving), prefer main.
+    if (mainOk && (mainTop > 0 || winTop === 0)) return main;
+
+    // Otherwise use window/document scroll.
+    return null; // null means "window"
+  }
+
+  function getScrollTop(scroller) {
+    if (scroller) return scroller.scrollTop || 0;
+    return window.scrollY || 0;
+  }
+
+  function getViewportH(scroller) {
+    if (scroller) return scroller.clientHeight || 1;
+    return window.innerHeight || 1;
+  }
+
+  function getScrollable(scroller) {
+    if (scroller) {
+      return Math.max(1, (scroller.scrollHeight || 1) - (scroller.clientHeight || 1));
+    }
+    const doc = document.documentElement;
+    return Math.max(1, (doc.scrollHeight || 1) - (window.innerHeight || 1));
+  }
+
+  function deriveActiveNavKeyByCenter(scroller) {
+    const centerY = getViewportH(scroller) * 0.5;
+
+    const containerTop = scroller
+      ? scroller.getBoundingClientRect().top
+      : 0;
+
+    let bestIdx = 0;
     let bestDist = Infinity;
 
-    for (const s of sections) {
-      const r = s.getBoundingClientRect();
-      const sectionCenter = r.top + r.height * 0.5;
+    for (let i = 0; i < sections.length; i++) {
+      const r = sections[i].getBoundingClientRect();
+      const sectionCenter = (r.top - containerTop) + r.height * 0.5;
       const d = Math.abs(sectionCenter - centerY);
       if (d < bestDist) {
         bestDist = d;
-        best = s;
+        bestIdx = i;
       }
     }
 
-    const direct = best?.getAttribute("data-nav");
+    const direct = sections[bestIdx]?.getAttribute("data-nav");
     if (direct && navKeySet.has(direct)) return direct;
 
-    // fallback: look upward
-    const idx = Math.max(0, sections.indexOf(best));
-    for (let i = idx; i >= 0; i--) {
+    for (let i = bestIdx; i >= 0; i--) {
       const k = sections[i].getAttribute("data-nav");
       if (k && navKeySet.has(k)) return k;
     }
@@ -128,40 +172,67 @@ export function createSections(navItems) {
     return navItems[0]?.key || "mission";
   }
 
-  function handleScroll() {
-    const st = window.scrollY || 0;
-    const vh = window.innerHeight || 1;
-    const doc = document.documentElement;
-    const scrollable = Math.max(1, (doc.scrollHeight || 1) - vh);
+  // Updates state based on whichever scroller is actually active
+  function updateState() {
+    const scroller = getScroller();
+    const st = getScrollTop(scroller);
+    const scrollable = getScrollable(scroller);
+    const vh = getViewportH(scroller);
 
     state.scrollTarget = clamp01(st / scrollable);
     state.heroProgress = clamp01(st / Math.max(vh, 1));
 
-    const navKey = deriveActiveNavKeyByCenter();
+    const navKey = deriveActiveNavKeyByCenter(scroller);
     if (navKey !== state.activeKey) state.activeKey = navKey;
+  }
+
+  // Hard scroll that works whether the page scrolls via window or .app-main
+  function hardScrollToSection(sectionEl) {
+    if (!sectionEl) return;
+
+    // If app-main is scrollable, scroll inside it using offsetTop
+    if (mainIsScrollable()) {
+      const y = sectionEl.offsetTop || 0;
+      main.scrollTo({ top: y, behavior: "smooth" });
+      return;
+    }
+
+    // Otherwise scroll the window
+    const y =
+      Math.max(
+        0,
+        Math.round(sectionEl.getBoundingClientRect().top + (window.scrollY || 0) - 90)
+      );
+
+    window.scrollTo({ top: y, behavior: "smooth" });
+    document.documentElement.scrollTop = y;
+    document.body.scrollTop = y;
   }
 
   function handleNavClick(key) {
     const section = navKeyToSection.get(key);
     if (!section) return;
-
-    // rock-solid smooth scroll
-    section.scrollIntoView({ behavior: "smooth", block: "start" });
+    hardScrollToSection(section);
     state.activeKey = key;
   }
 
+  recomputeMaps();
+  updateState();
+
+  // IMPORTANT: don’t trust scroll events; update continuously
+  let raf = 0;
+  function tick() {
+    updateState();
+    raf = requestAnimationFrame(tick);
+  }
+  tick();
+
+  // still handle resize/layout shifts
   const onResize = () => {
-    recomputeLayoutMaps();
-    handleScroll();
+    recomputeMaps();
+    updateState();
   };
-
-  recomputeLayoutMaps();
-  handleScroll();
-
-  window.addEventListener("scroll", handleScroll, { passive: true });
   window.addEventListener("resize", onResize);
-
-  // layout shifts (fonts/video)
   setTimeout(onResize, 0);
   setTimeout(onResize, 250);
   setTimeout(onResize, 1000);
@@ -169,8 +240,9 @@ export function createSections(navItems) {
   return {
     state,
     handleNavClick,
+    getScrollTarget: () => state.scrollTarget,
     dispose() {
-      window.removeEventListener("scroll", handleScroll);
+      cancelAnimationFrame(raf);
       window.removeEventListener("resize", onResize);
     },
   };
