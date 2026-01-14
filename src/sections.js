@@ -10,6 +10,9 @@ export function createSections(navItems) {
   const root = document.getElementById("sections-root");
   if (!root) throw new Error("Missing #sections-root");
 
+  // IMPORTANT:
+  // - video section gets data-nav="video"
+  // - image section gets data-nav="image"
   root.innerHTML = `
     <section id="section-mission" class="section section-hero" data-nav="mission">
       <div class="hero-inner">
@@ -24,7 +27,7 @@ export function createSections(navItems) {
       </div>
     </section>
 
-    <section id="section-video" class="section section-video">
+    <section id="section-video" class="section section-video" data-nav="video">
       <div class="section-inner">
         <div class="media-frame">
           <video
@@ -49,7 +52,7 @@ export function createSections(navItems) {
       </div>
     </section>
 
-    <section id="section-missionImage" class="section section-image">
+    <section id="section-missionImage" class="section section-image" data-nav="image">
       <div class="image-fill" role="img" aria-label="Mission image"></div>
     </section>
 
@@ -88,49 +91,31 @@ export function createSections(navItems) {
 
   const sections = Array.from(root.querySelectorAll("section.section"));
   const navKeySet = new Set(navItems.map((i) => i.key));
-  const main = document.querySelector(".app-main");
 
-  let navKeyToSection = new Map();
-  function recomputeMaps() {
-    navKeyToSection = new Map();
-    for (const s of sections) {
-      const k = s.getAttribute("data-nav");
-      if (k && navKeySet.has(k) && !navKeyToSection.has(k)) {
-        navKeyToSection.set(k, s);
-      }
-    }
-  }
+  // --------- real scroller detection (simple + reliable) ----------
+  const main = document.querySelector(".app-main");
 
   function mainIsScrollable() {
     if (!main) return false;
     const cs = window.getComputedStyle(main);
     const oy = cs.overflowY;
-    const canScroll =
-      oy === "auto" || oy === "scroll" || oy === "overlay";
+    const canScroll = oy === "auto" || oy === "scroll" || oy === "overlay";
     return canScroll && main.scrollHeight > main.clientHeight + 2;
   }
 
-  // Decide which scroller is currently active, based on which one can scroll and/or has a scrollTop
   function getScroller() {
-    const mainOk = mainIsScrollable();
-    const mainTop = mainOk ? (main.scrollTop || 0) : 0;
-    const winTop = window.scrollY || 0;
-
-    // If main is scrollable and is being used (or window isn't moving), prefer main.
-    if (mainOk && (mainTop > 0 || winTop === 0)) return main;
-
-    // Otherwise use window/document scroll.
-    return null; // null means "window"
+    // If app-main is truly scrollable, use it.
+    if (mainIsScrollable()) return main;
+    // Otherwise the page is scrolling normally.
+    return null; // null = window
   }
 
   function getScrollTop(scroller) {
-    if (scroller) return scroller.scrollTop || 0;
-    return window.scrollY || 0;
+    return scroller ? scroller.scrollTop || 0 : window.scrollY || 0;
   }
 
   function getViewportH(scroller) {
-    if (scroller) return scroller.clientHeight || 1;
-    return window.innerHeight || 1;
+    return scroller ? scroller.clientHeight || 1 : window.innerHeight || 1;
   }
 
   function getScrollable(scroller) {
@@ -141,12 +126,19 @@ export function createSections(navItems) {
     return Math.max(1, (doc.scrollHeight || 1) - (window.innerHeight || 1));
   }
 
+  // map nav key -> first section with that data-nav
+  let navKeyToSection = new Map();
+  function recomputeMaps() {
+    navKeyToSection = new Map();
+    for (const s of sections) {
+      const k = s.getAttribute("data-nav");
+      if (k && navKeySet.has(k) && !navKeyToSection.has(k)) navKeyToSection.set(k, s);
+    }
+  }
+
   function deriveActiveNavKeyByCenter(scroller) {
     const centerY = getViewportH(scroller) * 0.5;
-
-    const containerTop = scroller
-      ? scroller.getBoundingClientRect().top
-      : 0;
+    const containerTop = scroller ? scroller.getBoundingClientRect().top : 0;
 
     let bestIdx = 0;
     let bestDist = Infinity;
@@ -164,6 +156,7 @@ export function createSections(navItems) {
     const direct = sections[bestIdx]?.getAttribute("data-nav");
     if (direct && navKeySet.has(direct)) return direct;
 
+    // fallback upward
     for (let i = bestIdx; i >= 0; i--) {
       const k = sections[i].getAttribute("data-nav");
       if (k && navKeySet.has(k)) return k;
@@ -172,7 +165,6 @@ export function createSections(navItems) {
     return navItems[0]?.key || "mission";
   }
 
-  // Updates state based on whichever scroller is actually active
   function updateState() {
     const scroller = getScroller();
     const st = getScrollTop(scroller);
@@ -186,27 +178,25 @@ export function createSections(navItems) {
     if (navKey !== state.activeKey) state.activeKey = navKey;
   }
 
-  // Hard scroll that works whether the page scrolls via window or .app-main
   function hardScrollToSection(sectionEl) {
     if (!sectionEl) return;
 
-    // If app-main is scrollable, scroll inside it using offsetTop
-    if (mainIsScrollable()) {
-      const y = sectionEl.offsetTop || 0;
-      main.scrollTo({ top: y, behavior: "smooth" });
-      return;
-    }
+    const scroller = getScroller();
 
-    // Otherwise scroll the window
-    const y =
-      Math.max(
+    if (scroller) {
+      // scrolling inside app-main
+      const y = sectionEl.offsetTop || 0;
+      scroller.scrollTo({ top: y, behavior: "smooth" });
+    } else {
+      // window scroll
+      const y = Math.max(
         0,
         Math.round(sectionEl.getBoundingClientRect().top + (window.scrollY || 0) - 90)
       );
-
-    window.scrollTo({ top: y, behavior: "smooth" });
-    document.documentElement.scrollTop = y;
-    document.body.scrollTop = y;
+      window.scrollTo({ top: y, behavior: "smooth" });
+      document.documentElement.scrollTop = y;
+      document.body.scrollTop = y;
+    }
   }
 
   function handleNavClick(key) {
@@ -219,7 +209,7 @@ export function createSections(navItems) {
   recomputeMaps();
   updateState();
 
-  // IMPORTANT: don’t trust scroll events; update continuously
+  // update continuously so it always tracks the correct scroller
   let raf = 0;
   function tick() {
     updateState();
@@ -227,12 +217,13 @@ export function createSections(navItems) {
   }
   tick();
 
-  // still handle resize/layout shifts
   const onResize = () => {
     recomputeMaps();
     updateState();
   };
   window.addEventListener("resize", onResize);
+
+  // layout shifts (fonts/video)
   setTimeout(onResize, 0);
   setTimeout(onResize, 250);
   setTimeout(onResize, 1000);
