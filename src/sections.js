@@ -91,9 +91,18 @@ export function createSections(navItems) {
   const navKeySet = new Set(navItems.map((i) => i.key));
 
   // Pick the real scroll container (window OR .app-main)
+  function isScrollable(el) {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    const overflowY = style.overflowY;
+    const canScroll =
+      overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay";
+    return canScroll && el.scrollHeight > el.clientHeight + 2;
+  }
+
   function getScrollEl() {
     const main = document.querySelector(".app-main");
-    if (main && main.scrollHeight > main.clientHeight + 2) return main;
+    if (isScrollable(main)) return main;
     return document.scrollingElement || document.documentElement;
   }
 
