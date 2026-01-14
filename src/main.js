@@ -11,7 +11,6 @@ const NAV_ITEMS = [
   { key: "events", label: "Contact", image: "5-min.jpg" },
 ];
 
-// Your model interpolation states (unchanged)
 const MODEL_STATES = [
   { zoom: 1.0, yShift: 0.0, rotX: 0.0, rotY: 0.0 },
   { zoom: 4.0, yShift: 2.5, rotX: 0.0, rotY: 1.0 },
@@ -53,7 +52,8 @@ function createPointerLightControls() {
     const vNorm = Math.min(speed / 1000, 1);
     const minIntensity = 0.4;
     const maxIntensityVal = 2.5;
-    state.lightIntensity = minIntensity + (maxIntensityVal - minIntensity) * vNorm;
+    state.lightIntensity =
+      minIntensity + (maxIntensityVal - minIntensity) * vNorm;
     state.lightSpeed = vNorm;
   }
 
@@ -68,25 +68,69 @@ function createPointerLightControls() {
 }
 
 /**
- * ✅ SINGLE SOURCE OF TRUTH FOR SCROLL PROGRESS (0..1)
- * Your site is scrolling inside `.app-main`, not window.
- * This returns a normalized 0..1 value and logs it.
+ * ✅ Robust scroll progress: auto-detect the actual scrolling container.
+ * Logs to console which scroller is used and the live scroll01 value.
  */
-function getScroll01() {
-  const main = document.querySelector(".app-main");
-  if (!main) {
-    console.log("scroll01: 0.000 (no .app-main found)");
-    return 0;
+const getScroll01 = (() => {
+  let scroller = null; // HTMLElement or "window"
+  let didLogChoice = false;
+
+  function isScrollableEl(el) {
+    if (!el || el === document.body || el === document.documentElement) return false;
+    const cs = getComputedStyle(el);
+    const oy = cs.overflowY;
+    const canScroll = oy === "auto" || oy === "scroll" || oy === "overlay";
+    return canScroll && el.scrollHeight > el.clientHeight + 2;
   }
 
-  const st = main.scrollTop || 0;
-  const max = Math.max(1, (main.scrollHeight || 1) - (main.clientHeight || 1));
-  const v = st / max;
+  function findScroller() {
+    // Prefer a real scrollable ancestor of sections-root if it exists.
+    const anchor = document.getElementById("sections-root");
+    let el = anchor;
 
-  console.log("scroll01:", v.toFixed(3));
+    while (el && el !== document.body && el !== document.documentElement) {
+      if (isScrollableEl(el)) return el;
+      el = el.parentElement;
+    }
 
-  return Math.max(0, Math.min(1, v));
-}
+    // Otherwise use window.
+    return "window";
+  }
+
+  function read01(from) {
+    if (from === "window") {
+      const se = document.scrollingElement || document.documentElement;
+      const st = window.scrollY || se.scrollTop || 0;
+      const max = Math.max(1, (se.scrollHeight || 1) - (window.innerHeight || 1));
+      return Math.max(0, Math.min(1, st / max));
+    } else {
+      const st = from.scrollTop || 0;
+      const max = Math.max(1, (from.scrollHeight || 1) - (from.clientHeight || 1));
+      return Math.max(0, Math.min(1, st / max));
+    }
+  }
+
+  return function getScroll01() {
+    if (!scroller) {
+      scroller = findScroller();
+      if (!didLogChoice) {
+        didLogChoice = true;
+        console.log(
+          "[scroll] scroller picked:",
+          scroller === "window"
+            ? "window"
+            : `${scroller.tagName.toLowerCase()}#${scroller.id || ""}.${(scroller.className || "")
+                .toString()
+                .replace(/\s+/g, ".")}`
+        );
+      }
+    }
+
+    const v = read01(scroller);
+    console.log("scroll01:", v.toFixed(3));
+    return v;
+  };
+})();
 
 function setupButtons(handleNavClick) {
   const heroEnter = document.getElementById("hero-enter");
@@ -118,7 +162,6 @@ function setupButtons(handleNavClick) {
 (function boot() {
   setVhVar();
 
-  // Keep your old debug overlay code out of the way — console only now
   console.log("ios:", String(isIOSUA()));
   console.log("mobile:", String(isMobileUA()));
   console.log("url:", window.location.pathname);
@@ -134,7 +177,7 @@ function setupButtons(handleNavClick) {
 
   const three = createThreeScene({
     mountEl,
-    // ✅ Critical fix: Three reads the actual scrolling container
+    // ✅ Critical: Three reads actual scroll progress
     getScrollTarget: () => getScroll01(),
     getPointerState: () => pointer.state,
     modelStates: MODEL_STATES,
@@ -146,7 +189,6 @@ function setupButtons(handleNavClick) {
   const getActiveItem = () =>
     NAV_ITEMS.find((i) => i.key === sections.state.activeKey) || NAV_ITEMS[0];
 
-  // initial background
   three.startCrossfadeTo(getActiveItem().image);
 
   mountFooterNav({
@@ -157,7 +199,6 @@ function setupButtons(handleNavClick) {
     onItemClick: (key) => sections.handleNavClick(key),
   });
 
-  // Keep your bg updates on section changes
   let lastActive = sections.state.activeKey;
 
   function tick() {
@@ -166,7 +207,6 @@ function setupButtons(handleNavClick) {
       lastActive = active;
       three.startCrossfadeTo(getActiveItem().image);
     }
-
     requestAnimationFrame(tick);
   }
 
